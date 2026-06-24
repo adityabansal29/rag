@@ -1,0 +1,13 @@
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Vector store data
+chroma_*/
+chroma_db/

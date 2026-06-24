@@ -1,0 +1,16 @@
+[project]
+name = "rag"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "chromadb>=1.5.9",
+    "docling>=2.106.0",
+    "langchain-core>=1.4.8",
+    "openai>=2.43.0",
+    "pinecone>=9.1.0",
+    "python-dotenv>=1.2.2",
+    "qdrant-client>=1.18.0",
+    "tiktoken>=0.13.0",
+    "unstructured[all-docs]>=0.23.1",
+]
