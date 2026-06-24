@@ -2,6 +2,7 @@ import asyncio
 
 from rag.models import Chunk, ChunkType
 from rag.llm.base import BaseLLMClient
+from collections import Counter
 
 
 SYSTEM_PROMPTS: dict[ChunkType, str] = {

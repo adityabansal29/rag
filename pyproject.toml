@@ -1,3 +1,10 @@
+[tool.setuptools]
+package-dir = {"" = ".."}
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["rag", "rag.*"]
+
 [project]
 name = "rag"
 version = "0.1.0"

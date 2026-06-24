@@ -118,13 +118,12 @@ class UnstructuredParser(BaseParser):
             )
 
         elif element_type == 'Image':
-            image_b64 = elem.metadata.image_base64 or ""
             return Chunk(
                 id=chunk_id,
                 parent_id=parent_id,
                 chunk_type=ChunkType.IMAGE,
                 metadata=base_metadata,
-                raw_content=image_b64,
+                raw_content=elem.metadata.image_base64 or "",
             )
 
         elif element_type == 'CodeSnippet':
@@ -148,7 +147,6 @@ class UnstructuredParser(BaseParser):
                 raw_content=elem.text,
             )
 
-        # skip unknown element types
         return None
 
     def _heading_level(self, elem) -> int:

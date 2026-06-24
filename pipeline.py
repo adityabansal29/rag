@@ -91,6 +91,7 @@ class RAGPipeline:
         print(f"[1/6] Parsing {Path(file_path).name} with {parser}...")
         raw_parents = self._get_parser(parser).parse(file_path)
         print(f"      → {len(raw_parents)} sections found")
+        BaseParser.print_chunks(raw_parents)
 
         print("[2/6] Merging/splitting text chunks...")
         parent_chunks = process_all_parents(raw_parents)
