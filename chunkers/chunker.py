@@ -1,4 +1,5 @@
 import hashlib
+from collections import Counter
 from dataclasses import replace
 
 import tiktoken
@@ -131,6 +132,30 @@ def merge_split_text_chunks(parent: Chunk) -> Chunk:
     return new_parent
 
 
+def _chunk_summary(chunks: list[Chunk]) -> list[tuple]:
+    return [
+        (
+            parent.id,
+            parent.metadata.get("section_title", "")[:50],
+            len(parent.children),
+            Counter(child.chunk_type.value for child in parent.children),
+        )
+        for parent in chunks
+    ]
+
+
 def process_all_parents(parent_chunks: list[Chunk]) -> list[Chunk]:
-    """Apply merge/split to all parent chunks."""
-    return [merge_split_text_chunks(p) for p in parent_chunks]
+    """Apply merge/split to all parent chunks and print before/after summary."""
+    before = _chunk_summary(parent_chunks)
+    result = [merge_split_text_chunks(p) for p in parent_chunks]
+    after  = _chunk_summary(result)
+
+    print(f"\n{'ID':34} {'Section':52} {'before':>6}  {'after':>5}  {'before_types':30}  after_types")
+    print("-" * 160)
+    for (pid, title, b_total, b_counts), (_, _, a_total, a_counts) in zip(before, after):
+        b_str = "  ".join(f"{k}={v}" for k, v in sorted(b_counts.items()))
+        a_str = "  ".join(f"{k}={v}" for k, v in sorted(a_counts.items()))
+        print(f"{pid:34} {title:52} {b_total:>6}  {a_total:>5}  {b_str:30}  {a_str}")
+    print()
+
+    return result

@@ -110,6 +110,7 @@ class LLMEnricher:
                     system_prompt=system_prompt,
                     content=str(chunk.raw_content or ""),
                 )
+            print(f"  [enriched] type={chunk.chunk_type.value}  page={chunk.metadata.get('page', '?')}  id={chunk.id}  → {chunk.retrieved_content[:50]!r}")
 
     async def _summarize_parent(self, parent: Chunk) -> None:
         if not parent.children:
@@ -131,6 +132,7 @@ class LLMEnricher:
                 system_prompt=PARENT_SUMMARY_PROMPT,
                 content=combined,
             )
+            print(f"  [parent enriched] id={parent.id}  section={parent.metadata.get('section_title', '')[:30]!r}  → {parent.retrieved_content[:50]!r}")
 
 
 def build_embedding_content(parent_chunks: list[Chunk]) -> None:

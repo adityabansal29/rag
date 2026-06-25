@@ -1,56 +1,72 @@
 from pinecone import Pinecone, ServerlessSpec
+from pinecone_text.sparse import BM25Encoder
 from langchain_core.documents import Document
 
-from rag.vectorstores.base import BaseVectorStore
+from rag.vectorstores.base import BaseVectorStore, SearchParams
 
 
 class PineconeVectorStore(BaseVectorStore):
     """
     Pinecone serverless vector store.
-    Creates index if it doesn't exist.
+    Hybrid search: native sparse-dense with alpha weighting via pinecone-text BM25Encoder.
+    Note: enable_hybrid=True requires metric="dotproduct" — create a new index if switching.
     """
 
     def __init__(
         self,
         api_key: str,
         index_name: str = "rag-pipeline",
-        dimension: int = 1536,           # text-embedding-3-small dimension
+        dimension: int = 1536,
         cloud: str = "aws",
         region: str = "us-east-1",
-        namespace: str = "default",
+        namespace: str = "rag",
+        enable_hybrid: bool = False,
     ):
         self.pc = Pinecone(api_key=api_key)
         self.namespace = namespace
+        self.enable_hybrid = enable_hybrid
 
-        # create index if not exists
+        metric = "dotproduct" if enable_hybrid else "cosine"
+
         existing = [i.name for i in self.pc.list_indexes()]
         if index_name not in existing:
             self.pc.create_index(
                 name=index_name,
                 dimension=dimension,
-                metric="cosine",
+                metric=metric,
                 spec=ServerlessSpec(cloud=cloud, region=region),
             )
 
         self.index = self.pc.Index(index_name)
+
+        if enable_hybrid:
+            self._sparse_encoder = BM25Encoder().default()
 
     def upsert(
         self,
         documents: list[Document],
         vectors: list[list[float]],
     ) -> None:
+        texts = [doc.page_content for doc in documents]
+
+        sparse_vecs = None
+        if self.enable_hybrid:
+            sparse_vecs = self._sparse_encoder.encode_documents(texts)
+
         records = []
-        for doc, vector in zip(documents, vectors):
-            records.append({
+        for i, (doc, vector) in enumerate(zip(documents, vectors)):
+            record = {
                 "id":     doc.metadata["chunk_id"],
                 "values": vector,
                 "metadata": {
                     **doc.metadata,
-                    "text": doc.page_content,   # store text in metadata for retrieval
+                    "text": doc.page_content,
                 },
-            })
+            }
+            if sparse_vecs:
+                record["sparse_values"] = sparse_vecs[i]
+            records.append(record)
 
-        # upsert in batches of 100
         batch_size = 100
         for i in range(0, len(records), batch_size):
             self.index.upsert(
@@ -61,24 +77,43 @@ class PineconeVectorStore(BaseVectorStore):
     def search(
         self,
         query_vector: list[float],
-        top_k: int = 5,
-        filter: dict | None = None,
+        query_text: str | None = None,
+        params: SearchParams = None,
+        alpha: float = 0.75,
     ) -> list[Document]:
-        results = self.index.query(
-            vector=query_vector,
-            top_k=top_k,
-            filter=filter,
+        params = params or SearchParams()
+
+        dense_vec = query_vector
+        sparse_vector = None
+        if self.enable_hybrid and params.use_hybrid and query_text:
+            raw_sparse = self._sparse_encoder.encode_queries(query_text)
+            dense_vec = [v * alpha for v in query_vector]
+            sparse_vector = {
+                "indices": raw_sparse["indices"],
+                "values":  [v * (1 - alpha) for v in raw_sparse["values"]],
+            }
+
+        query_kwargs = dict(
+            vector=dense_vec,
+            top_k=params.top_k,
+            filter=params.metadata_filters,
             include_metadata=True,
             namespace=self.namespace,
         )
+        if sparse_vector:
+            query_kwargs["sparse_vector"] = sparse_vector
+
+        results = self.index.query(**query_kwargs)
 
         docs = []
         for match in results["matches"]:
+            if params.cosine_threshold is not None and match["score"] < params.cosine_threshold:
+                continue
             metadata = dict(match["metadata"])
             text = metadata.pop("text", "")
             docs.append(Document(
                 page_content=text,
-                metadata=metadata,
+                metadata={**metadata, "score": round(match["score"], 4)},
             ))
         return docs
 
