@@ -1,47 +1,45 @@
-from anthropic import AsyncAnthropic
+from typing import TypeVar, Type
+
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import SystemMessage, HumanMessage
+from pydantic import BaseModel
 
 from rag.llm.base import BaseLLMClient
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class AnthropicLLMClient(BaseLLMClient):
     def __init__(self, model: str = "claude-opus-4-7"):
-        self.client = AsyncAnthropic()
-        self.model = model
+        self.llm = ChatAnthropic(model=model, temperature=0, max_tokens=1024)
 
-    async def call_text(self, system_prompt: str, content: str) -> str:
+    async def call_text(
+        self,
+        system_prompt: str,
+        content: str,
+        response_model: Type[T] | None = None,
+    ) -> str | T:
+        messages = [SystemMessage(system_prompt), HumanMessage(content)]
         try:
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=512,
-                system=system_prompt,
-                messages=[{"role": "user", "content": content}],
-            )
-            return response.content[0].text
+            if response_model is not None:
+                return await self.llm.with_structured_output(response_model).ainvoke(messages)
+            result = await self.llm.ainvoke(messages)
+            return result.content
         except Exception as e:
             return f"[enrichment error: {str(e)}]"
 
     async def call_vision(self, system_prompt: str, image_b64: str) -> str:
         if not image_b64:
             return "[no image data]"
+        messages = [
+            SystemMessage(system_prompt),
+            HumanMessage(content=[{
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+            }]),
+        ]
         try:
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=512,
-                system=system_prompt,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": image_b64,
-                            },
-                        }
-                    ],
-                }],
-            )
-            return response.content[0].text
+            result = await self.llm.ainvoke(messages)
+            return result.content
         except Exception as e:
             return f"[vision enrichment error: {str(e)}]"

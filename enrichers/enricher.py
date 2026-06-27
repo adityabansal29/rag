@@ -1,8 +1,9 @@
 import asyncio
 
-from rag.models import Chunk, ChunkType
-from rag.llm.base import BaseLLMClient
 from collections import Counter
+
+from rag.models import Chunk, ChunkType
+from rag.llm.base import BaseLLMClient, build_llm_client
 
 
 SYSTEM_PROMPTS: dict[ChunkType, str] = {
@@ -63,34 +64,21 @@ class LLMEnricher:
         if isinstance(provider, BaseLLMClient):
             self.llm = provider
         else:
-            self.llm = self._build_client(provider, model)
-
-    def _build_client(self, provider: str, model: str | None) -> BaseLLMClient:
-        match provider:
-            case "openai":
-                from rag.llm.openai_client import OpenAILLMClient
-                return OpenAILLMClient(model=model or "gpt-4o")
-
-            case "anthropic":
-                from rag.llm.anthropic_client import AnthropicLLMClient
-                return AnthropicLLMClient(model=model or "claude-opus-4-7")
-
-            case "gemini":
-                from rag.llm.gemini_client import GeminiLLMClient
-                return GeminiLLMClient(model=model or "gemini-2.0-flash")
-
-            case _:
-                raise ValueError(
-                    f"Unknown provider: {provider!r}. Choose 'openai', 'anthropic', or 'gemini'."
-                )
+            self.llm = build_llm_client(provider, model)
 
     async def enrich_all(self, parent_chunks: list[Chunk]) -> None:
         all_children: list[Chunk] = []
         for parent in parent_chunks:
             all_children.extend(parent.children)
 
+        non_text = [c for c in all_children if c.chunk_type != ChunkType.TEXT]
+        text_count = len(all_children) - len(non_text)
+        print(f"  [enricher] {len(all_children)} children total: {text_count} text (passthrough), {len(non_text)} non-text (LLM) across {len(parent_chunks)} parents")
+
         await asyncio.gather(*[self._enrich_child(child) for child in all_children])
         await asyncio.gather(*[self._summarize_parent(parent) for parent in parent_chunks])
+
+        print(f"  [enricher] all {len(parent_chunks)} parents summarized")
 
     async def _enrich_child(self, chunk: Chunk) -> None:
         if chunk.chunk_type == ChunkType.TEXT:

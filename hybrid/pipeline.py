@@ -16,11 +16,6 @@ from rag.vectorstores.chroma_store import ChromaVectorStore
 
 
 def chunks_to_langchain_docs(parent_chunks: list[Chunk]) -> list[Document]:
-    """
-    Convert child chunks to LangChain Documents.
-    Uses embedding_content as page_content.
-    Attaches full metadata including parent info.
-    """
     docs: list[Document] = []
 
     for parent in parent_chunks:
@@ -31,26 +26,21 @@ def chunks_to_langchain_docs(parent_chunks: list[Chunk]) -> list[Document]:
             docs.append(Document(
                 page_content=child.embedding_content,
                 metadata={
-                    # identifiers
                     "chunk_id":        child.id,
                     "parent_id":       child.parent_id,
-
-                    # content
                     "chunk_type":      child.chunk_type.value,
                     **({"raw_content": str(child.raw_content or "")} if child.chunk_type != ChunkType.TEXT else {}),
-
-                    # source metadata
                     **{k: v for k, v in child.metadata.items()
-                       if isinstance(v, (str, int, float, bool))},  # chroma/pinecone safe types only
+                       if isinstance(v, (str, int, float, bool))},
                 },
             ))
 
     return docs
 
 
-class RAGPipeline:
+class HybridRAGPipeline:
     """
-    Full RAG ingestion pipeline.
+    Full RAG ingestion + hybrid search pipeline.
 
     Flow:
         parse → chunk (merge/split) → enrich (LLM) → build embedding text
@@ -66,6 +56,7 @@ class RAGPipeline:
     ):
         self.embedder    = embedder    or OpenAIEmbedder()
         self.vectorstore = vectorstore or ChromaVectorStore()
+        self.llm_model   = llm_model
         self.enricher    = LLMEnricher(
             model=llm_model,
             max_concurrency=llm_concurrency,
@@ -83,10 +74,6 @@ class RAGPipeline:
         file_path: str,
         parser: str = "unstructured",
     ) -> list[Chunk]:
-        """
-        Full async pipeline run.
-        Returns parent chunks with all fields populated.
-        """
         print(f"\n{'='*60}")
         print(f"[1/6] Parsing {Path(file_path).name} with {parser}...")
         print(f"{'='*60}\n")
@@ -129,23 +116,34 @@ class RAGPipeline:
 
         return parent_chunks
 
-    def run(
-        self,
-        file_path: str,
-        parser: str = "unstructured",
-    ) -> list[Chunk]:
-        """Sync wrapper around run_async."""
+    def run(self, file_path: str, parser: str = "unstructured") -> list[Chunk]:
         return asyncio.run(self.run_async(file_path, parser))
 
-    def search(
-        self,
-        query: str,
-        params: SearchParams = None,
-    ) -> list[Document]:
-        """Search the vector store with a text query."""
+    def search(self, query: str, params: SearchParams = None) -> list[Document]:
+        params = params or SearchParams()
+        mode = "hybrid" if params.use_hybrid else "dense"
+        print(f"\n  [search] query='{query[:80]}'  mode={mode}  top_k={params.top_k}")
         query_vector = self.embedder.embed_query(query)
-        return self.vectorstore.search(
+        results = self.vectorstore.search(
             query_vector=query_vector,
             query_text=query,
-            params=params or SearchParams(),
+            params=params,
         )
+        print(f"  [search] → {len(results)} chunks returned")
+        return results
+
+    async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
+        print(f"\n  [generate] query='{query[:80]}'  context_chunks={len(chunks)}")
+        context = "\n\n".join(f"[{i+1}] {doc.page_content}" for i, doc in enumerate(chunks))
+        answer = await self.enricher.llm.call_text(
+            system_prompt=(
+                "You are a helpful assistant. Answer the question using only the provided context. "
+                "Be concise and accurate. If the context is insufficient, say so."
+            ),
+            content=f"Context:\n{context}\n\nQuestion: {query}",
+        )
+        print(f"  [generate] → {answer[:120]!r}")
+        return answer
+
+    def generate_answer(self, query: str, chunks: list[Document]) -> str:
+        return asyncio.run(self.generate_answer_async(query, chunks))

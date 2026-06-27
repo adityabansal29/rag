@@ -132,6 +132,14 @@ class QdrantVectorStore(BaseVectorStore):
                 score_threshold=params.cosine_threshold,
             )
 
+        print(f"\n  Qdrant Dense Results  threshold={params.cosine_threshold}")
+        print(f"  {'#':<5} {'Chunk ID':<40} {'Score':>8}")
+        print(f"  {'-'*5} {'-'*40} {'-'*8}")
+        for i, hit in enumerate(results):
+            chunk_id = hit.payload.get("chunk_id", hit.id)
+            print(f"  {i:<5} {str(chunk_id):<40} {hit.score:>8.4f}")
+        print()
+
         return self._hits_to_docs(results)
 
     def _hybrid_search(
@@ -167,6 +175,14 @@ class QdrantVectorStore(BaseVectorStore):
             score_threshold=params.rrf_score_threshold,
             with_payload=True,
         )
+
+        print(f"\n  Qdrant Hybrid Results (RRF, k=60)")
+        print(f"  {'#':<5} {'Chunk ID':<40} {'RRF Score':>10}")
+        print(f"  {'-'*5} {'-'*40} {'-'*10}")
+        for i, point in enumerate(results.points):
+            chunk_id = point.payload.get("chunk_id", point.id)
+            print(f"  {i:<5} {str(chunk_id):<40} {point.score:>10.6f}")
+        print()
 
         return self._hits_to_docs(results.points)
 

@@ -1,43 +1,45 @@
-import base64
-import os
+from typing import TypeVar, Type
 
-from google import genai
-from google.genai import types
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage
+from pydantic import BaseModel
 
 from rag.llm.base import BaseLLMClient
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class GeminiLLMClient(BaseLLMClient):
     def __init__(self, model: str = "gemini-2.0-flash"):
-        self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-        self.model = model
+        self.llm = ChatGoogleGenerativeAI(model=model, temperature=0, max_output_tokens=1024)
 
-    async def call_text(self, system_prompt: str, content: str) -> str:
+    async def call_text(
+        self,
+        system_prompt: str,
+        content: str,
+        response_model: Type[T] | None = None,
+    ) -> str | T:
+        messages = [SystemMessage(system_prompt), HumanMessage(content)]
         try:
-            response = await self.client.aio.models.generate_content(
-                model=self.model,
-                contents=content,
-                config={"system_instruction": system_prompt, "max_output_tokens": 512},
-            )
-            return response.text or ""
+            if response_model is not None:
+                return await self.llm.with_structured_output(response_model).ainvoke(messages)
+            result = await self.llm.ainvoke(messages)
+            return result.content
         except Exception as e:
             return f"[enrichment error: {str(e)}]"
 
     async def call_vision(self, system_prompt: str, image_b64: str) -> str:
         if not image_b64:
             return "[no image data]"
+        messages = [
+            SystemMessage(system_prompt),
+            HumanMessage(content=[{
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+            }]),
+        ]
         try:
-            response = await self.client.aio.models.generate_content(
-                model=self.model,
-                contents=[
-                    types.Part.from_bytes(
-                        data=base64.b64decode(image_b64),
-                        mime_type="image/png",
-                    ),
-                    system_prompt,
-                ],
-                config={"max_output_tokens": 512},
-            )
-            return response.text or ""
+            result = await self.llm.ainvoke(messages)
+            return result.content
         except Exception as e:
             return f"[vision enrichment error: {str(e)}]"

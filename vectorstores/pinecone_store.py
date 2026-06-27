@@ -105,6 +105,16 @@ class PineconeVectorStore(BaseVectorStore):
 
         results = self.index.query(**query_kwargs)
 
+        is_hybrid = sparse_vector is not None
+        label = f"Pinecone {'Hybrid' if is_hybrid else 'Dense'} Results (alpha={alpha if is_hybrid else 'n/a'})"
+        print(f"\n  {label}")
+        print(f"  {'#':<5} {'Chunk ID':<40} {'Score':>10} {'Status':>10}")
+        print(f"  {'-'*5} {'-'*40} {'-'*10} {'-'*10}")
+        for i, match in enumerate(results["matches"]):
+            status = "kept" if (params.cosine_threshold is None or match["score"] >= params.cosine_threshold) else "filtered"
+            print(f"  {i:<5} {match['id']:<40} {match['score']:>10.6f} {status:>10}")
+        print()
+
         docs = []
         for match in results["matches"]:
             if params.cosine_threshold is not None and match["score"] < params.cosine_threshold:
