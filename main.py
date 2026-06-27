@@ -22,7 +22,7 @@ async def index(file_path: str, parser: str = "unstructured") -> None:
     print(f"\nIngested {len(parent_chunks)} sections.")
 
 
-def query(
+async def query(
     questions: list[str],
     params: SearchParams = None,
     use_fusion: bool = False,
@@ -41,7 +41,7 @@ def query(
             print(f"  [multi-turn] {len(history.turns)} prior turn(s) in context")
         print(f"{'='*60}\n")
 
-        chunks = searcher.search(question, params=params, history=history)
+        chunks = await searcher.search_async(question, params=params, history=history)
 
         if not chunks:
             print("  No results above similarity threshold.\n")
@@ -54,8 +54,8 @@ def query(
             print(f"  {doc.page_content}")
             print()
 
-        answer = pipeline.generate_answer(question, chunks)
-        result = evaluator.evaluate_sync(question, chunks, answer)
+        answer = await pipeline.generate_answer_async(question, chunks)
+        result = await evaluator.evaluate(question, chunks, answer)
         result.print_summary()
 
         if history is not None:
@@ -66,8 +66,12 @@ if __name__ == "__main__":
     load_env()
 
     # asyncio.run(index("./dynamo.pdf", parser="unstructured"))
-    query([
-        "Why does Dynamo resolve conflicts during reads rather than writes?",
-        "How do vector clocks help Dynamo handle concurrent updates, and what is their limitation?",
-        "How does hinted handoff work, and what problem does it solve?"
-    ], params=SearchParams(top_k=4, use_hybrid=True), use_fusion=True)
+    asyncio.run(query(
+        [
+            "Why does Dynamo resolve conflicts during reads rather than writes?",
+            "How do vector clocks help Dynamo handle concurrent updates, and what is their limitation?",
+            "How does hinted handoff work, and what problem does it solve?"
+        ],
+        params=SearchParams(top_k=4, use_hybrid=True),
+        use_fusion=True,
+    ))

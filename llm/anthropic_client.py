@@ -20,9 +20,9 @@ class AnthropicLLMClient(BaseLLMClient):
         response_model: Type[T] | None = None,
     ) -> str | T:
         messages = [SystemMessage(system_prompt), HumanMessage(content)]
+        if response_model is not None:
+            return await self.llm.with_structured_output(response_model).ainvoke(messages)
         try:
-            if response_model is not None:
-                return await self.llm.with_structured_output(response_model).ainvoke(messages)
             result = await self.llm.ainvoke(messages)
             return result.content
         except Exception as e:

@@ -56,10 +56,10 @@ class HybridRAGPipeline:
         llm_model: str = "gpt-4o",
         llm_concurrency: int = 10,
     ):
-        self.embedder    = embedder    or OpenAIEmbedder()
-        self.vectorstore = vectorstore or ChromaVectorStore()
-        self.llm_model   = llm_model
-        self.enricher      = LLMEnricher(
+        self.embedder       = embedder    or OpenAIEmbedder()
+        self.vectorstore    = vectorstore or ChromaVectorStore()
+        self.llm_model      = llm_model
+        self.enricher       = LLMEnricher(
             model=llm_model,
             max_concurrency=llm_concurrency,
         )
@@ -122,7 +122,7 @@ class HybridRAGPipeline:
     def run(self, file_path: str, parser: str = "unstructured") -> list[Chunk]:
         return asyncio.run(self.run_async(file_path, parser))
 
-    def search(
+    async def search_async(
         self,
         query: str,
         params: SearchParams = None,
@@ -130,7 +130,7 @@ class HybridRAGPipeline:
     ) -> list[Document]:
         params = params or SearchParams()
         if history is not None and not history.is_empty():
-            standalone = asyncio.run(self.contextualizer.contextualize(query, history))
+            standalone = await self.contextualizer.contextualize(query, history)
             print(f"\n  [contextualize] '{query[:60]}' → '{standalone[:60]}'")
             query = standalone
 
@@ -144,6 +144,14 @@ class HybridRAGPipeline:
         )
         print(f"  [search] → {len(results)} chunks returned")
         return results
+
+    def search(
+        self,
+        query: str,
+        params: SearchParams = None,
+        history: ConversationHistory | None = None,
+    ) -> list[Document]:
+        return asyncio.run(self.search_async(query, params, history))
 
     async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
         print(f"\n  [generate] query='{query[:80]}'  context_chunks={len(chunks)}")

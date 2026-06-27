@@ -60,7 +60,7 @@ class FusionRAGPipeline:
         )
 
         results_per_query: list[list[Document]] = await asyncio.gather(*[
-            asyncio.to_thread(self.pipeline.search, q, sub_params)
+            self.pipeline.search_async(q, sub_params)
             for q in all_queries
         ])
 
