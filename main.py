@@ -7,6 +7,7 @@ from rag.hybrid.pipeline import HybridRAGPipeline
 from rag.fusion.pipeline import FusionRAGPipeline
 from rag.vectorstores.base import SearchParams
 from rag.evaluators.llm_evaluator import LLMEvaluator
+from rag.conversation.history import ConversationHistory
 
 
 def load_env():
@@ -21,21 +22,31 @@ async def index(file_path: str, parser: str = "unstructured") -> None:
     print(f"\nIngested {len(parent_chunks)} sections.")
 
 
-def query(questions: list[str], params: SearchParams = None, use_fusion: bool = False) -> None:
+def query(
+    questions: list[str],
+    params: SearchParams = None,
+    use_fusion: bool = False,
+    multi_turn: bool = True,
+) -> None:
     pipeline  = HybridRAGPipeline()
     searcher  = FusionRAGPipeline(pipeline, n_queries=3) if use_fusion else pipeline
     evaluator = LLMEvaluator(pipeline.enricher.llm)
     params    = params or SearchParams(top_k=3)
+    history   = ConversationHistory() if multi_turn else None
 
     for question in questions:
         print(f"\n{'='*60}")
         print(f"  Question: {question}")
+        if history and not history.is_empty():
+            print(f"  [multi-turn] {len(history.turns)} prior turn(s) in context")
         print(f"{'='*60}\n")
 
-        chunks = searcher.search(question, params=params)
+        chunks = searcher.search(question, params=params, history=history)
 
         if not chunks:
             print("  No results above similarity threshold.\n")
+            if history is not None:
+                history.add(question, "[no results]")
             continue
 
         for i, doc in enumerate(chunks):
@@ -46,6 +57,9 @@ def query(questions: list[str], params: SearchParams = None, use_fusion: bool = 
         answer = pipeline.generate_answer(question, chunks)
         result = evaluator.evaluate_sync(question, chunks, answer)
         result.print_summary()
+
+        if history is not None:
+            history.add(question, answer)
 
 
 if __name__ == "__main__":

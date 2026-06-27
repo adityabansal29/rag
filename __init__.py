@@ -4,6 +4,7 @@ from rag.embedders.openai_embedder import OpenAIEmbedder
 from rag.vectorstores.chroma_store import ChromaVectorStore
 from rag.vectorstores.pinecone_store import PineconeVectorStore
 from rag.vectorstores.qdrant_store import QdrantVectorStore
+from rag.conversation.history import ConversationHistory
 
 __all__ = [
     "HybridRAGPipeline",
@@ -12,4 +13,5 @@ __all__ = [
     "ChromaVectorStore",
     "PineconeVectorStore",
     "QdrantVectorStore",
+    "ConversationHistory",
 ]

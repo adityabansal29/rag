@@ -7,6 +7,7 @@ from rag.hybrid.pipeline import HybridRAGPipeline
 from rag.vectorstores.base import SearchParams
 from rag.fusion.query_rewriter import QueryRewriter
 from rag.utils.rrf import rrf_fuse
+from rag.conversation.history import ConversationHistory
 
 
 class FusionRAGPipeline:
@@ -36,9 +37,14 @@ class FusionRAGPipeline:
         self,
         query: str,
         params: SearchParams = None,
+        history: ConversationHistory | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
-        all_queries = [query] + await self.rewriter.rewrite(query, self.n_queries)
+        # Single LLM call: contextualize (if history) + rewrite variants together
+        standalone, variants = await self.rewriter.rewrite(query, self.n_queries, history)
+        if standalone != query:
+            print(f"\n  [contextualize] '{query[:60]}' → '{standalone[:60]}'")
+        all_queries = [standalone] + variants
 
         print(f"\n  [fusion] rewritten queries ({len(all_queries)} total):")
         for i, q in enumerate(all_queries):
@@ -91,5 +97,10 @@ class FusionRAGPipeline:
             if id_ in doc_lookup
         ]
 
-    def search(self, query: str, params: SearchParams = None) -> list[Document]:
-        return asyncio.run(self.search_async(query, params))
+    def search(
+        self,
+        query: str,
+        params: SearchParams = None,
+        history: ConversationHistory | None = None,
+    ) -> list[Document]:
+        return asyncio.run(self.search_async(query, params, history))

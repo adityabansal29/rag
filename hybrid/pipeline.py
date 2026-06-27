@@ -13,6 +13,8 @@ from rag.embedders.base import BaseEmbedder
 from rag.embedders.openai_embedder import OpenAIEmbedder
 from rag.vectorstores.base import BaseVectorStore, SearchParams
 from rag.vectorstores.chroma_store import ChromaVectorStore
+from rag.conversation.history import ConversationHistory
+from rag.conversation.contextualizer import QueryContextualizer
 
 
 def chunks_to_langchain_docs(parent_chunks: list[Chunk]) -> list[Document]:
@@ -57,10 +59,11 @@ class HybridRAGPipeline:
         self.embedder    = embedder    or OpenAIEmbedder()
         self.vectorstore = vectorstore or ChromaVectorStore()
         self.llm_model   = llm_model
-        self.enricher    = LLMEnricher(
+        self.enricher      = LLMEnricher(
             model=llm_model,
             max_concurrency=llm_concurrency,
         )
+        self.contextualizer = QueryContextualizer(self.enricher.llm)
 
     def _get_parser(self, parser: str) -> BaseParser:
         if parser == "unstructured":
@@ -119,8 +122,18 @@ class HybridRAGPipeline:
     def run(self, file_path: str, parser: str = "unstructured") -> list[Chunk]:
         return asyncio.run(self.run_async(file_path, parser))
 
-    def search(self, query: str, params: SearchParams = None) -> list[Document]:
+    def search(
+        self,
+        query: str,
+        params: SearchParams = None,
+        history: ConversationHistory | None = None,
+    ) -> list[Document]:
         params = params or SearchParams()
+        if history is not None and not history.is_empty():
+            standalone = asyncio.run(self.contextualizer.contextualize(query, history))
+            print(f"\n  [contextualize] '{query[:60]}' → '{standalone[:60]}'")
+            query = standalone
+
         mode = "hybrid" if params.use_hybrid else "dense"
         print(f"\n  [search] query='{query[:80]}'  mode={mode}  top_k={params.top_k}")
         query_vector = self.embedder.embed_query(query)
