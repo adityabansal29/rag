@@ -87,9 +87,11 @@ class FusionRAGPipeline:
 
         # RRF across all query result lists
         rrf_scores = rrf_fuse(rank_lists)
-        top_ids = sorted(rrf_scores, key=lambda id_: rrf_scores[id_], reverse=True)[:params.top_k]
+        # when re-ranking, pass all RRF candidates so the reranker does the final slicing
+        candidate_count = len(rrf_scores) if self.pipeline.reranker is not None else params.top_k
+        top_ids = sorted(rrf_scores, key=lambda id_: rrf_scores[id_], reverse=True)[:candidate_count]
 
-        print(f"\n  [fusion] RRF merged → top {params.top_k} of {len(rrf_scores)} unique chunks")
+        print(f"\n  [fusion] RRF merged → top {candidate_count} of {len(rrf_scores)} unique chunks")
         print(f"  {'Chunk ID':<40} {'RRF Score':>10}")
         print(f"  {'-'*40} {'-'*10}")
         for id_ in top_ids:

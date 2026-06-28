@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -140,10 +141,13 @@ class HybridRAGPipeline:
         mode = "hybrid" if params.use_hybrid else "dense"
         print(f"\n  [search] query='{query[:80]}'  mode={mode}  top_k={params.top_k}")
         query_vector = self.embedder.embed_query(query)
+
+        # fetch a larger pool when re-ranking so the reranker can make a real selection
+        retrieve_params = replace(params, top_k=params.top_k * 3) if self.reranker is not None else params
         results = self.vectorstore.search(
             query_vector=query_vector,
             query_text=query,
-            params=params,
+            params=retrieve_params,
         )
         print(f"  [search] → {len(results)} chunks returned")
 
