@@ -36,7 +36,7 @@ class FusionRAGPipeline:
     async def search_async(
         self,
         query: str,
-        params: SearchParams = None,
+        params: SearchParams | None = None,
         history: ConversationHistory | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
@@ -51,31 +51,39 @@ class FusionRAGPipeline:
             label = "original" if i == 0 else f"variant {i}"
             print(f"    [{label}] {q}")
 
-        # fetch more per sub-query; disable thresholds so RRF decides quality
-        sub_params = replace(
-            params,
-            top_k=params.top_k * len(all_queries),
-            cosine_threshold=None,
-            rrf_score_threshold=None,
-        )
+        inflated_top_k = params.top_k * len(all_queries)
 
-        results_per_query: list[list[Document]] = await asyncio.gather(*[
-            self.pipeline.search_async(q, sub_params)
-            for q in all_queries
-        ])
+        if params.use_hybrid:
+            # BM25 once on standalone + dense on every variant — merged in outer RRF
+            bm25_params   = replace(params, top_k=inflated_top_k, rrf_score_threshold=None, use_hybrid=False)
+            dense_params  = replace(params, top_k=inflated_top_k, cosine_threshold=None, rrf_score_threshold=None, use_hybrid=False)
+
+            bm25_results, *dense_results = await asyncio.gather(
+                self.pipeline.bm25_search_async(standalone, bm25_params),
+                *[self.pipeline.dense_search_async(q, dense_params) for q in all_queries],
+            )
+            labeled = [("bm25:standalone", bm25_results)] + [
+                (f"dense:{q[:40]}", docs) for q, docs in zip(all_queries, dense_results)
+            ]
+        else:
+            dense_params = replace(params, top_k=inflated_top_k, cosine_threshold=None, rrf_score_threshold=None)
+            dense_results = await asyncio.gather(*[
+                self.pipeline.dense_search_async(q, dense_params) for q in all_queries
+            ])
+            labeled = [(f"dense:{q[:40]}", docs) for q, docs in zip(all_queries, dense_results)]
 
         # build doc lookup and ranked id lists
         doc_lookup: dict[str, Document] = {}
         rank_lists: list[list[str]] = []
 
-        for q, docs in zip(all_queries, results_per_query):
+        for label, docs in labeled:
             ids = []
             for doc in docs:
                 chunk_id = doc.metadata["chunk_id"]
                 doc_lookup[chunk_id] = doc
                 ids.append(chunk_id)
             rank_lists.append(ids)
-            print(f"  [fusion] '{q[:60]}' → {len(docs)} chunks")
+            print(f"  [fusion] '{label}' → {len(docs)} chunks")
 
         # RRF across all query result lists
         rrf_scores = rrf_fuse(rank_lists)
@@ -88,7 +96,7 @@ class FusionRAGPipeline:
             print(f"  {id_:<40} {rrf_scores[id_]:>10.6f}")
         print()
 
-        return [
+        final_docs = [
             Document(
                 page_content=doc_lookup[id_].page_content,
                 metadata={**doc_lookup[id_].metadata, "rrf_score": round(rrf_scores[id_], 6)},
@@ -97,10 +105,15 @@ class FusionRAGPipeline:
             if id_ in doc_lookup
         ]
 
+        if self.pipeline.reranker is not None and final_docs:
+            final_docs = self.pipeline.reranker.rerank(standalone, final_docs, top_k=params.top_k)
+
+        return final_docs
+
     def search(
         self,
         query: str,
-        params: SearchParams = None,
+        params: SearchParams | None = None,
         history: ConversationHistory | None = None,
     ) -> list[Document]:
         return asyncio.run(self.search_async(query, params, history))

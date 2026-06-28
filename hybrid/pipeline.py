@@ -15,6 +15,7 @@ from rag.vectorstores.base import BaseVectorStore, SearchParams
 from rag.vectorstores.chroma_store import ChromaVectorStore
 from rag.conversation.history import ConversationHistory
 from rag.conversation.contextualizer import QueryContextualizer
+from rag.rerankers.base import BaseReranker
 
 
 def chunks_to_langchain_docs(parent_chunks: list[Chunk]) -> list[Document]:
@@ -55,10 +56,12 @@ class HybridRAGPipeline:
         vectorstore: BaseVectorStore | None = None,
         llm_model: str = "gpt-4o",
         llm_concurrency: int = 10,
+        reranker: BaseReranker | None = None,
     ):
         self.embedder       = embedder    or OpenAIEmbedder()
         self.vectorstore    = vectorstore or ChromaVectorStore()
         self.llm_model      = llm_model
+        self.reranker       = reranker
         self.enricher       = LLMEnricher(
             model=llm_model,
             max_concurrency=llm_concurrency,
@@ -125,7 +128,7 @@ class HybridRAGPipeline:
     async def search_async(
         self,
         query: str,
-        params: SearchParams = None,
+        params: SearchParams | None = None,
         history: ConversationHistory | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
@@ -143,15 +146,46 @@ class HybridRAGPipeline:
             params=params,
         )
         print(f"  [search] → {len(results)} chunks returned")
+
+        if self.reranker is not None and results:
+            results = self.reranker.rerank(query, results, top_k=params.top_k)
+
         return results
 
     def search(
         self,
         query: str,
-        params: SearchParams = None,
+        params: SearchParams | None = None,
         history: ConversationHistory | None = None,
     ) -> list[Document]:
         return asyncio.run(self.search_async(query, params, history))
+
+    async def bm25_search_async(
+        self,
+        query: str,
+        params: SearchParams | None = None,
+    ) -> list[Document]:
+        params = params or SearchParams()
+        print(f"\n  [bm25] query='{query[:80]}'  top_k={params.top_k}")
+        results = self.vectorstore.bm25_search(query, params)
+        print(f"  [bm25] → {len(results)} chunks returned")
+        return results
+
+    async def dense_search_async(
+        self,
+        query: str,
+        params: SearchParams | None = None,
+    ) -> list[Document]:
+        params = params or SearchParams()
+        print(f"\n  [dense] query='{query[:80]}'  top_k={params.top_k}")
+        query_vector = self.embedder.embed_query(query)
+        results = self.vectorstore.search(
+            query_vector=query_vector,
+            query_text=query,
+            params=params,
+        )
+        print(f"  [dense] → {len(results)} chunks returned")
+        return results
 
     async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
         print(f"\n  [generate] query='{query[:80]}'  context_chunks={len(chunks)}")

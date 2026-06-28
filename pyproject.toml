@@ -12,6 +12,7 @@ description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
     "chromadb>=1.5.9",
+    "cohere>=7.0.4",
     "docling>=2.106.0",
     "fastembed>=0.4.0",
     "langchain-anthropic>=0.3.0",
@@ -25,6 +26,13 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "qdrant-client>=1.18.0",
     "rank-bm25>=0.2.2",
+    "sentence-transformers>=5.6.0",
     "tiktoken>=0.13.0",
     "unstructured[all-docs]>=0.23.1",
+]
+
+[project.optional-dependencies]
+rerankers = [
+    "sentence-transformers>=3.0.0",  # CrossEncoderReranker
+    "cohere>=5.0.0",                  # CohereReranker
 ]

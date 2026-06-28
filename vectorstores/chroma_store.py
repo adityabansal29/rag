@@ -51,7 +51,7 @@ class ChromaVectorStore(BaseVectorStore):
         self,
         query_vector: list[float],
         query_text: str | None = None,
-        params: SearchParams = None,
+        params: SearchParams | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
 
@@ -81,6 +81,35 @@ class ChromaVectorStore(BaseVectorStore):
             ))
         print()
         return docs
+
+    def bm25_search(
+        self,
+        query_text: str,
+        params: SearchParams | None = None,
+    ) -> list[Document]:
+        params = params or SearchParams()
+        all_docs = self.collection.get(
+            where=params.metadata_filters,
+            include=["documents", "metadatas"],
+        )
+        if not all_docs["ids"]:
+            return []
+
+        langchain_docs = [
+            Document(page_content=text, metadata=meta)
+            for text, meta in zip(all_docs["documents"], all_docs["metadatas"])
+        ]
+        bm25 = BM25Retriever.from_documents(langchain_docs, k=params.top_k)
+        results = bm25.invoke(query_text)
+
+        print(f"\n  BM25 Rankings  corpus={len(all_docs['ids'])}")
+        print(f"  {'#':<5} {'Chunk ID':<40} {'RRF Score':>10}")
+        print(f"  {'-'*5} {'-'*40} {'-'*10}")
+        for rank, doc in enumerate(results):
+            print(f"  {rank:<5} {str(doc.metadata.get('chunk_id','?')):<40} {1/(60+rank):>10.6f}")
+        print()
+
+        return results
 
     def _hybrid_search(
         self,

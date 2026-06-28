@@ -106,7 +106,7 @@ class QdrantVectorStore(BaseVectorStore):
         self,
         query_vector: list[float],
         query_text: str | None = None,
-        params: SearchParams = None,
+        params: SearchParams | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
         qdrant_filter = self._build_filter(params.metadata_filters)
@@ -141,6 +141,37 @@ class QdrantVectorStore(BaseVectorStore):
         print()
 
         return self._hits_to_docs(results)
+
+    def bm25_search(
+        self,
+        query_text: str,
+        params: SearchParams | None = None,
+    ) -> list[Document]:
+        if not self.enable_hybrid:
+            raise NotImplementedError("QdrantVectorStore requires enable_hybrid=True for BM25 search.")
+        params = params or SearchParams()
+        sparse_query = list(self._sparse_model.query_embed(query_text))[0]
+
+        results = self.client.query_points(
+            collection_name=self.collection_name,
+            query=SparseVector(
+                indices=sparse_query.indices.tolist(),
+                values=sparse_query.values.tolist(),
+            ),
+            using=self.SPARSE_VEC,
+            limit=params.top_k,
+            with_payload=True,
+        )
+
+        print(f"\n  Qdrant BM25 Results")
+        print(f"  {'#':<5} {'Chunk ID':<40} {'Score':>8}")
+        print(f"  {'-'*5} {'-'*40} {'-'*8}")
+        for i, point in enumerate(results.points):
+            chunk_id = point.payload.get("chunk_id", point.id)
+            print(f"  {i:<5} {str(chunk_id):<40} {point.score:>8.4f}")
+        print()
+
+        return self._hits_to_docs(results.points)
 
     def _hybrid_search(
         self,

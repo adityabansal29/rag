@@ -33,10 +33,18 @@ class BaseVectorStore(ABC):
         self,
         query_vector: list[float],
         query_text: str | None = None,
-        params: SearchParams = None,
+        params: SearchParams | None = None,
     ) -> list[Document]:
         """Search by vector. Returns documents above score_threshold up to top_k."""
         ...
+
+    def bm25_search(
+        self,
+        query_text: str,
+        params: SearchParams | None = None,
+    ) -> list[Document]:
+        """BM25-only search. Returns documents ranked by keyword relevance."""
+        raise NotImplementedError(f"{self.__class__.__name__} does not support standalone BM25 search.")
 
     @abstractmethod
     def delete(self, ids: list[str]) -> None:

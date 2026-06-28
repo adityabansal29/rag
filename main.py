@@ -24,7 +24,7 @@ async def index(file_path: str, parser: str = "unstructured") -> None:
 
 async def query(
     questions: list[str],
-    params: SearchParams = None,
+    params: SearchParams | None = None,
     use_fusion: bool = False,
     multi_turn: bool = True,
 ) -> None:

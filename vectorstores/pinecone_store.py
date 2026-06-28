@@ -78,7 +78,7 @@ class PineconeVectorStore(BaseVectorStore):
         self,
         query_vector: list[float],
         query_text: str | None = None,
-        params: SearchParams = None,
+        params: SearchParams | None = None,
         alpha: float = 0.75,
     ) -> list[Document]:
         params = params or SearchParams()
@@ -119,6 +119,47 @@ class PineconeVectorStore(BaseVectorStore):
         for match in results["matches"]:
             if params.cosine_threshold is not None and match["score"] < params.cosine_threshold:
                 continue
+            metadata = dict(match["metadata"])
+            text = metadata.pop("text", "")
+            docs.append(Document(
+                page_content=text,
+                metadata={**metadata, "score": round(match["score"], 4)},
+            ))
+        return docs
+
+    def bm25_search(
+        self,
+        query_text: str,
+        params: SearchParams | None = None,
+    ) -> list[Document]:
+        if not self.enable_hybrid:
+            raise NotImplementedError("PineconeVectorStore requires enable_hybrid=True for BM25 search.")
+        params = params or SearchParams()
+        raw_sparse = self._sparse_encoder.encode_queries(query_text)
+        sparse_vector = {
+            "indices": raw_sparse["indices"],
+            "values":  raw_sparse["values"],
+        }
+        zero_dense = [0.0] * self.index.describe_index_stats()["dimension"]
+
+        results = self.index.query(
+            vector=zero_dense,
+            sparse_vector=sparse_vector,
+            top_k=params.top_k,
+            filter=params.metadata_filters,
+            include_metadata=True,
+            namespace=self.namespace,
+        )
+
+        print(f"\n  Pinecone BM25 Results")
+        print(f"  {'#':<5} {'Chunk ID':<40} {'Score':>10}")
+        print(f"  {'-'*5} {'-'*40} {'-'*10}")
+        for i, match in enumerate(results["matches"]):
+            print(f"  {i:<5} {match['id']:<40} {match['score']:>10.6f}")
+        print()
+
+        docs = []
+        for match in results["matches"]:
             metadata = dict(match["metadata"])
             text = metadata.pop("text", "")
             docs.append(Document(
