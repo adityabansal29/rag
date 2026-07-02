@@ -1,7 +1,5 @@
 import asyncio
 
-from collections import Counter
-
 from rag.models import Chunk, ChunkType
 from rag.llm.base import BaseLLMClient, build_llm_client
 

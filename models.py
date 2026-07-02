@@ -36,7 +36,7 @@ class Chunk:
     id:                str
     parent_id:         Optional[str]
     chunk_type:        ChunkType
-    metadata:          dict                       # source, page, section, heading_level etc
+    metadata:          dict[str, Any]              # source, page, section, heading_level etc
     raw_content:       Any                        # str / base64 str / html str
     retrieved_content: Optional[str]  = None      # LLM enriched content
     embedding_content: Optional[str]  = None      # final text for embedding

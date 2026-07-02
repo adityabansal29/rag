@@ -131,7 +131,7 @@ class HybridRAGPipeline:
         query: str,
         params: SearchParams | None = None,
         history: ConversationHistory | None = None,
-    ) -> list[Document]:
+    ) -> tuple[str, list[Document]]:
         params = params or SearchParams()
         if history is not None and not history.is_empty():
             standalone = await self.contextualizer.contextualize(query, history)
@@ -154,14 +154,14 @@ class HybridRAGPipeline:
         if self.reranker is not None and results:
             results = self.reranker.rerank(query, results, top_k=params.top_k)
 
-        return results
+        return query, results
 
     def search(
         self,
         query: str,
         params: SearchParams | None = None,
         history: ConversationHistory | None = None,
-    ) -> list[Document]:
+    ) -> tuple[str, list[Document]]:
         return asyncio.run(self.search_async(query, params, history))
 
     async def bm25_search_async(

@@ -17,7 +17,7 @@ class ChromaVectorStore(BaseVectorStore):
     def __init__(
         self,
         collection_name: str = "rag",
-        persist_directory: str = "./chroma_db",
+        persist_directory: str = "./chroma_test_db",
         host: str | None = None,
         port: int | None = None,
     ):
@@ -30,6 +30,34 @@ class ChromaVectorStore(BaseVectorStore):
             name=collection_name,
             metadata={"hnsw:space": "cosine"},
         )
+        self._bm25_cache: tuple[list[Document], BM25Retriever] | None = None
+
+    def _get_bm25_corpus(self, metadata_filters: dict | None) -> tuple[list[Document], dict]:
+        """Fetch all docs for BM25, using a cache when there are no metadata filters."""
+        all_docs = self.collection.get(
+            where=metadata_filters,
+            include=["documents", "metadatas"],
+        )
+        langchain_docs = [
+            Document(page_content=text, metadata=meta)
+            for text, meta in zip(all_docs["documents"], all_docs["metadatas"])
+        ]
+        return langchain_docs, all_docs
+
+    def _get_bm25_retriever(self, k: int, metadata_filters: dict | None) -> BM25Retriever:
+        """Return a cached BM25Retriever for filter-free queries, rebuild otherwise."""
+        if metadata_filters:
+            langchain_docs, _ = self._get_bm25_corpus(metadata_filters)
+            return BM25Retriever.from_documents(langchain_docs, k=k)
+        if self._bm25_cache is None:
+            langchain_docs, _ = self._get_bm25_corpus(None)
+            self._bm25_cache = (langchain_docs, BM25Retriever.from_documents(langchain_docs, k=k))
+        cached_docs, retriever = self._bm25_cache
+        retriever.k = k
+        return retriever
+
+    def _invalidate_bm25_cache(self) -> None:
+        self._bm25_cache = None
 
     def upsert(
         self,
@@ -46,6 +74,7 @@ class ChromaVectorStore(BaseVectorStore):
             embeddings=vectors,
             metadatas=metadatas,
         )
+        self._invalidate_bm25_cache()
 
     def search(
         self,
@@ -54,6 +83,9 @@ class ChromaVectorStore(BaseVectorStore):
         params: SearchParams | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
+
+        if self.collection.count() == 0:
+            return []
 
         if params.use_hybrid and query_text:
             return self._hybrid_search(query_vector, query_text, params)
@@ -88,21 +120,14 @@ class ChromaVectorStore(BaseVectorStore):
         params: SearchParams | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
-        all_docs = self.collection.get(
-            where=params.metadata_filters,
-            include=["documents", "metadatas"],
-        )
-        if not all_docs["ids"]:
+        if self.collection.count() == 0:
             return []
 
-        langchain_docs = [
-            Document(page_content=text, metadata=meta)
-            for text, meta in zip(all_docs["documents"], all_docs["metadatas"])
-        ]
-        bm25 = BM25Retriever.from_documents(langchain_docs, k=params.top_k)
+        bm25 = self._get_bm25_retriever(params.top_k, params.metadata_filters)
         results = bm25.invoke(query_text)
 
-        print(f"\n  BM25 Rankings  corpus={len(all_docs['ids'])}")
+        corpus_size = self.collection.count()
+        print(f"\n  BM25 Rankings  corpus={corpus_size}")
         print(f"  {'#':<5} {'Chunk ID':<40} {'RRF Score':>10}")
         print(f"  {'-'*5} {'-'*40} {'-'*10}")
         for rank, doc in enumerate(results):
@@ -117,26 +142,27 @@ class ChromaVectorStore(BaseVectorStore):
         query_text: str,
         params: SearchParams,
     ) -> list[Document]:
-        # fetch all stored docs for BM25 corpus
-        all_docs = self.collection.get(
-            where=params.metadata_filters,
-            include=["documents", "metadatas"],
-        )
+        if self.collection.count() == 0:
+            return []
+
+        langchain_docs, all_docs = self._get_bm25_corpus(params.metadata_filters)
         if not all_docs["ids"]:
             return []
         print(f"\n  [chroma hybrid] corpus={len(all_docs['ids'])} docs  top_k={params.top_k}  rrf_threshold={params.rrf_score_threshold}")
 
-        langchain_docs = [
-            Document(page_content=text, metadata=meta)
-            for text, meta in zip(all_docs["documents"], all_docs["metadatas"])
-        ]
         doc_lookup = {
             meta["chunk_id"]: (text, meta)
             for text, meta in zip(all_docs["documents"], all_docs["metadatas"])
         }
 
-        # BM25 search
-        bm25 = BM25Retriever.from_documents(langchain_docs, k=params.top_k * 2)
+        # BM25 search — reuse already-fetched corpus to avoid a second DB read
+        if params.metadata_filters:
+            bm25 = BM25Retriever.from_documents(langchain_docs, k=params.top_k)
+        else:
+            if self._bm25_cache is None:
+                self._bm25_cache = (langchain_docs, BM25Retriever.from_documents(langchain_docs, k=params.top_k))
+            _, bm25 = self._bm25_cache
+            bm25.k = params.top_k
         bm25_results = bm25.invoke(query_text)
         bm25_rank = {
             doc.metadata["chunk_id"]: rank
@@ -151,7 +177,7 @@ class ChromaVectorStore(BaseVectorStore):
             print(f"  {rank:<5} {id_:<40} {rrf:>10.6f}")
 
         # dense search
-        n = min(params.top_k * 2, len(all_docs["ids"]))
+        n = min(params.top_k, len(all_docs["ids"]))
         dense_results = self.collection.query(
             query_embeddings=[query_vector],
             n_results=n,
@@ -174,7 +200,7 @@ class ChromaVectorStore(BaseVectorStore):
 
         top_ids = sorted(rrf_scores, key=lambda id_: rrf_scores[id_], reverse=True)[:params.top_k]
 
-        print(f"\n  {'RRF Merged (top {params.top_k})':}")
+        print(f"\n  RRF Merged (top {params.top_k}):")
         print(f"  {'Chunk ID':<40} {'RRF Score':>10} {'Status':>10}")
         print(f"  {'-'*40} {'-'*10} {'-'*10}")
         for id_ in top_ids:
@@ -197,3 +223,4 @@ class ChromaVectorStore(BaseVectorStore):
 
     def delete(self, ids: list[str]) -> None:
         self.collection.delete(ids=ids)
+        self._invalidate_bm25_cache()

@@ -38,13 +38,15 @@ class FusionRAGPipeline:
         query: str,
         params: SearchParams | None = None,
         history: ConversationHistory | None = None,
-    ) -> list[Document]:
+    ) -> tuple[str, list[Document]]:
         params = params or SearchParams()
         # Single LLM call: contextualize (if history) + rewrite variants together
         standalone, variants = await self.rewriter.rewrite(query, self.n_queries, history)
         if standalone != query:
             print(f"\n  [contextualize] '{query[:60]}' → '{standalone[:60]}'")
         all_queries = [standalone] + variants
+        if not variants:
+            print(f"  [fusion] warning: no variants returned — running as single-query dense search")
 
         print(f"\n  [fusion] rewritten queries ({len(all_queries)} total):")
         for i, q in enumerate(all_queries):
@@ -87,8 +89,8 @@ class FusionRAGPipeline:
 
         # RRF across all query result lists
         rrf_scores = rrf_fuse(rank_lists)
-        # when re-ranking, pass all RRF candidates so the reranker does the final slicing
-        candidate_count = len(rrf_scores) if self.pipeline.reranker is not None else params.top_k
+        # when re-ranking, pass a larger pool but cap it to avoid overwhelming the reranker
+        candidate_count = min(len(rrf_scores), params.top_k * 5) if self.pipeline.reranker is not None else params.top_k
         top_ids = sorted(rrf_scores, key=lambda id_: rrf_scores[id_], reverse=True)[:candidate_count]
 
         print(f"\n  [fusion] RRF merged → top {candidate_count} of {len(rrf_scores)} unique chunks")
@@ -104,18 +106,23 @@ class FusionRAGPipeline:
                 metadata={**doc_lookup[id_].metadata, "rrf_score": round(rrf_scores[id_], 6)},
             )
             for id_ in top_ids
-            if id_ in doc_lookup
         ]
 
         if self.pipeline.reranker is not None and final_docs:
             final_docs = self.pipeline.reranker.rerank(standalone, final_docs, top_k=params.top_k)
 
-        return final_docs
+        return standalone, final_docs
 
     def search(
         self,
         query: str,
         params: SearchParams | None = None,
         history: ConversationHistory | None = None,
-    ) -> list[Document]:
+    ) -> tuple[str, list[Document]]:
         return asyncio.run(self.search_async(query, params, history))
+
+    async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
+        return await self.pipeline.generate_answer_async(query, chunks)
+
+    def generate_answer(self, query: str, chunks: list[Document]) -> str:
+        return self.pipeline.generate_answer(query, chunks)

@@ -8,7 +8,10 @@ from rag.evaluators.base import ChunkScore, EvalResult
 
 class ChunkRelevanceResponse(BaseModel):
     chunks: list[ChunkScore]
-    avg_relevance: float
+
+    @property
+    def avg_relevance(self) -> float:
+        return sum(c.relevance for c in self.chunks) / len(self.chunks) if self.chunks else 0.0
 
 
 class FaithfulnessResponse(BaseModel):
@@ -28,7 +31,7 @@ def _format_chunks(chunks: list[Document]) -> str:
     lines = []
     for i, doc in enumerate(chunks):
         chunk_id = doc.metadata.get("chunk_id", f"chunk_{i}")
-        lines.append(f"[{i+1}] chunk_id={chunk_id}\n{doc.page_content[:500]}")
+        lines.append(f"[{i+1}] chunk_id={chunk_id}\n{doc.page_content[:2000]}")
     return "\n\n".join(lines)
 
 

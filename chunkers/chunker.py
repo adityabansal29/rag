@@ -1,14 +1,11 @@
 import hashlib
 from collections import Counter
-from dataclasses import replace
 
 import tiktoken
 
 from rag.models import Chunk, ChunkType
 
 
-# token count range for text child chunks
-MIN_TOKENS = 100
 MAX_TOKENS = 512
 
 
@@ -36,6 +33,7 @@ def merge_split_text_chunks(parent: Chunk) -> Chunk:
     processed: list[Chunk] = []
     text_buffer: list[Chunk] = []
     buffer_indices: list[int] = []
+    buffer_token_count: int = 0
 
     def flush_buffer():
         """Merge buffered text chunks into one or more final chunks."""
@@ -45,13 +43,16 @@ def merge_split_text_chunks(parent: Chunk) -> Chunk:
         combined_text = " ".join(c.raw_content for c in text_buffer)
         combined_tokens = _count_tokens(combined_text)
 
+        pages = sorted({c.metadata.get("page") for c in text_buffer if c.metadata.get("page") is not None})
+        page_meta = {"page": pages[0]} if len(pages) == 1 else {"page_start": pages[0], "page_end": pages[-1]}
+
         if combined_tokens <= MAX_TOKENS:
             # entire buffer fits in one chunk
             merged = Chunk(
                 id=_make_merged_id(parent.id, buffer_indices),
                 parent_id=parent.id,
                 chunk_type=ChunkType.TEXT,
-                metadata={**text_buffer[0].metadata, "merged_count": len(text_buffer)},
+                metadata={**text_buffer[0].metadata, **page_meta, "merged_count": len(text_buffer)},
                 raw_content=combined_text,
             )
             processed.append(merged)
@@ -78,6 +79,7 @@ def merge_split_text_chunks(parent: Chunk) -> Chunk:
                     chunk_type=ChunkType.TEXT,
                     metadata={
                         **text_buffer[0].metadata,
+                        **page_meta,
                         "split_index":  split_index,
                         "split_from":   buffer_indices,
                     },
@@ -88,6 +90,8 @@ def merge_split_text_chunks(parent: Chunk) -> Chunk:
 
         text_buffer.clear()
         buffer_indices.clear()
+        nonlocal buffer_token_count
+        buffer_token_count = 0
 
     for i, child in enumerate(parent.children):
         if child.chunk_type == ChunkType.TEXT:
@@ -97,19 +101,19 @@ def merge_split_text_chunks(parent: Chunk) -> Chunk:
                 # start new buffer
                 text_buffer.append(child)
                 buffer_indices.append(i)
+                buffer_token_count = token_count
             else:
-                buffer_tokens = _count_tokens(
-                    " ".join(c.raw_content for c in text_buffer)
-                )
-                if buffer_tokens + token_count <= MAX_TOKENS:
+                if buffer_token_count + token_count <= MAX_TOKENS:
                     # fits — add to buffer
                     text_buffer.append(child)
                     buffer_indices.append(i)
+                    buffer_token_count += token_count
                 else:
                     # flush current buffer, start new one
                     flush_buffer()
                     text_buffer.append(child)
                     buffer_indices.append(i)
+                    buffer_token_count = token_count
         else:
             # non-text — flush pending text buffer first, then add as-is
             flush_buffer()

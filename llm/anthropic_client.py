@@ -24,7 +24,7 @@ class AnthropicLLMClient(BaseLLMClient):
             return await self.llm.with_structured_output(response_model).ainvoke(messages)
         try:
             result = await self.llm.ainvoke(messages)
-            return result.content
+            return result.content if isinstance(result.content, str) else str(result.content)
         except Exception as e:
             return f"[enrichment error: {str(e)}]"
 
@@ -40,6 +40,6 @@ class AnthropicLLMClient(BaseLLMClient):
         ]
         try:
             result = await self.llm.ainvoke(messages)
-            return result.content
+            return result.content if isinstance(result.content, str) else str(result.content)
         except Exception as e:
             return f"[vision enrichment error: {str(e)}]"

@@ -1,12 +1,10 @@
-import uuid
-
 from fastembed import SparseTextEmbedding
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     VectorParams, Distance,
     PointStruct, Filter, FieldCondition, MatchValue,
     SparseVector, SparseVectorParams, SparseIndexParams,
-    Prefetch, FusionQuery, Fusion,
+    Prefetch, FusionQuery, Fusion, PointIdsList,
 )
 from langchain_core.documents import Document
 
@@ -66,6 +64,7 @@ class QdrantVectorStore(BaseVectorStore):
                     vectors_config=VectorParams(size=dimension, distance=Distance.COSINE),
                 )
 
+        self._sparse_model: SparseTextEmbedding | None = None
         if enable_hybrid:
             self._sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
 
@@ -95,7 +94,7 @@ class QdrantVectorStore(BaseVectorStore):
                 vector = dense_vec
 
             points.append(PointStruct(
-                id=str(uuid.uuid4()),
+                id=doc.metadata["chunk_id"],
                 vector=vector,
                 payload={**doc.metadata, "text": doc.page_content},
             ))
@@ -114,33 +113,25 @@ class QdrantVectorStore(BaseVectorStore):
         if self.enable_hybrid and params.use_hybrid and query_text:
             return self._hybrid_search(query_vector, query_text, params, qdrant_filter)
 
-        if self.enable_hybrid:
-            # dense-only search on hybrid collection
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=(self.DENSE_VEC, query_vector),
-                limit=params.top_k,
-                query_filter=qdrant_filter,
-                score_threshold=params.cosine_threshold,
-            )
-        else:
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=params.top_k,
-                query_filter=qdrant_filter,
-                score_threshold=params.cosine_threshold,
-            )
+        results = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_vector,
+            using=self.DENSE_VEC if self.enable_hybrid else None,
+            limit=params.top_k,
+            query_filter=qdrant_filter,
+            score_threshold=params.cosine_threshold,
+            with_payload=True,
+        )
 
         print(f"\n  Qdrant Dense Results  threshold={params.cosine_threshold}")
         print(f"  {'#':<5} {'Chunk ID':<40} {'Score':>8}")
         print(f"  {'-'*5} {'-'*40} {'-'*8}")
-        for i, hit in enumerate(results):
+        for i, hit in enumerate(results.points):
             chunk_id = hit.payload.get("chunk_id", hit.id)
             print(f"  {i:<5} {str(chunk_id):<40} {hit.score:>8.4f}")
         print()
 
-        return self._hits_to_docs(results)
+        return self._hits_to_docs(results.points)
 
     def bm25_search(
         self,
@@ -188,7 +179,7 @@ class QdrantVectorStore(BaseVectorStore):
                 Prefetch(
                     query=query_vector,
                     using=self.DENSE_VEC,
-                    limit=params.top_k * 2,
+                    limit=params.top_k,
                     filter=qdrant_filter,
                 ),
                 Prefetch(
@@ -197,7 +188,7 @@ class QdrantVectorStore(BaseVectorStore):
                         values=sparse_query.values.tolist(),
                     ),
                     using=self.SPARSE_VEC,
-                    limit=params.top_k * 2,
+                    limit=params.top_k,
                     filter=qdrant_filter,
                 ),
             ],
@@ -240,8 +231,5 @@ class QdrantVectorStore(BaseVectorStore):
     def delete(self, ids: list[str]) -> None:
         self.client.delete(
             collection_name=self.collection_name,
-            points_selector=Filter(must=[
-                FieldCondition(key="chunk_id", match=MatchValue(value=id_))
-                for id_ in ids
-            ]),
+            points_selector=PointIdsList(points=ids),
         )

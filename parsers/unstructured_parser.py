@@ -81,7 +81,7 @@ class UnstructuredParser(BaseParser):
                 source=source,
                 page=page,
                 parent_id=current_parent.id,
-                index=child_index,
+                index=elem_index,
             )
 
             if child:

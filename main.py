@@ -8,6 +8,7 @@ from rag.fusion.pipeline import FusionRAGPipeline
 from rag.vectorstores.base import SearchParams
 from rag.evaluators.llm_evaluator import LLMEvaluator
 from rag.conversation.history import ConversationHistory
+from rag.rerankers.cross_encoder import CrossEncoderReranker
 
 
 def load_env():
@@ -28,8 +29,8 @@ async def query(
     use_fusion: bool = False,
     multi_turn: bool = True,
 ) -> None:
-    pipeline  = HybridRAGPipeline()
-    searcher  = FusionRAGPipeline(pipeline, n_queries=3) if use_fusion else pipeline
+    pipeline  = HybridRAGPipeline(reranker=CrossEncoderReranker())
+    searcher  = FusionRAGPipeline(pipeline, n_queries=2) if use_fusion else pipeline
     evaluator = LLMEvaluator(pipeline.enricher.llm)
     params    = params or SearchParams(top_k=3)
     history   = ConversationHistory() if multi_turn else None
@@ -41,12 +42,12 @@ async def query(
             print(f"  [multi-turn] {len(history.turns)} prior turn(s) in context")
         print(f"{'='*60}\n")
 
-        chunks = await searcher.search_async(question, params=params, history=history)
+        standalone, chunks = await searcher.search_async(question, params=params, history=history)
 
         if not chunks:
             print("  No results above similarity threshold.\n")
             if history is not None:
-                history.add(question, "[no results]")
+                history.add(standalone, "[no results]")
             continue
 
         for i, doc in enumerate(chunks):
@@ -54,12 +55,12 @@ async def query(
             print(f"  {doc.page_content}")
             print()
 
-        answer = await pipeline.generate_answer_async(question, chunks)
-        result = await evaluator.evaluate(question, chunks, answer)
+        answer = await pipeline.generate_answer_async(standalone, chunks)
+        result = await evaluator.evaluate(standalone, chunks, answer)
         result.print_summary()
 
         if history is not None:
-            history.add(question, answer)
+            history.add(standalone, answer)
 
 
 if __name__ == "__main__":
@@ -68,8 +69,8 @@ if __name__ == "__main__":
     # asyncio.run(index("./dynamo.pdf", parser="unstructured"))
     asyncio.run(query(
         [
-            "Why does Dynamo resolve conflicts during reads rather than writes?",
-            "How do vector clocks help Dynamo handle concurrent updates, and what is their limitation?",
+            # "Why does Dynamo resolve conflicts during reads rather than writes?"
+            # "How do vector clocks help Dynamo handle concurrent updates, and what is their limitation?"
             "How does hinted handoff work, and what problem does it solve?"
         ],
         params=SearchParams(top_k=4, use_hybrid=True),

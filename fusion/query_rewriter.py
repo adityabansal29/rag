@@ -42,7 +42,8 @@ class QueryRewriter:
     ) -> tuple[str, list[str]]:
         """Returns (standalone_query, variants). When no history, standalone == query."""
         try:
-            if history is not None and not history.is_empty():
+            has_history = history is not None and not history.is_empty()
+            if has_history:
                 result: _ContextualizeAndRewrite = await self.llm.call_text(
                     system_prompt=_CONTEXTUALIZE_AND_REWRITE_SYSTEM,
                     content=(
@@ -52,14 +53,23 @@ class QueryRewriter:
                     ),
                     response_model=_ContextualizeAndRewrite,
                 )
-                return result.standalone, result.variants
+                variants = result.variants
             else:
                 result: _RewriteOnly = await self.llm.call_text(
                     system_prompt=_REWRITE_SYSTEM,
                     content=f"Original query: {query}\n\nGenerate exactly {n} alternative queries.",
                     response_model=_RewriteOnly,
                 )
-                return query, result.queries
+                variants = result.queries
+
+            if not variants:
+                print(f"  [rewriter] warning: LLM returned 0 variants, fusion will run on original query only")
+            elif len(variants) != n:
+                print(f"  [rewriter] warning: expected {n} variants, got {len(variants)}")
+
+            if has_history:
+                return result.standalone, variants
+            return query, variants
         except Exception as e:
             print(f"  [rewriter] warning: LLM call failed ({e}), skipping rewrite")
             return query, []
