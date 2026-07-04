@@ -3,6 +3,8 @@
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+dist/
 .venv/
 
 # Jupyter
@@ -11,3 +13,16 @@ __pycache__/
 # Vector store data
 chroma_*/
 chroma_db/
+
+# SQLite checkpointer
+*.db
+
+# Node / Next.js
+node_modules/
+.next/
+
+# macOS
+.DS_Store
+
+# Playwright MCP test artifacts
+.playwright-mcp/

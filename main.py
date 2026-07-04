@@ -7,7 +7,6 @@ from rag.hybrid.pipeline import HybridRAGPipeline
 from rag.fusion.pipeline import FusionRAGPipeline
 from rag.vectorstores.base import SearchParams
 from rag.evaluators.llm_evaluator import LLMEvaluator
-from rag.conversation.history import ConversationHistory
 from rag.rerankers.cross_encoder import CrossEncoderReranker
 
 
@@ -27,27 +26,21 @@ async def query(
     questions: list[str],
     params: SearchParams | None = None,
     use_fusion: bool = False,
-    multi_turn: bool = True,
 ) -> None:
     pipeline  = HybridRAGPipeline(reranker=CrossEncoderReranker())
     searcher  = FusionRAGPipeline(pipeline, n_queries=2) if use_fusion else pipeline
     evaluator = LLMEvaluator(pipeline.enricher.llm)
     params    = params or SearchParams(top_k=3)
-    history   = ConversationHistory() if multi_turn else None
 
     for question in questions:
         print(f"\n{'='*60}")
         print(f"  Question: {question}")
-        if history and not history.is_empty():
-            print(f"  [multi-turn] {len(history.turns)} prior turn(s) in context")
         print(f"{'='*60}\n")
 
-        standalone, chunks = await searcher.search_async(question, params=params, history=history)
+        standalone, chunks = await searcher.search_async(question, params=params)
 
         if not chunks:
             print("  No results above similarity threshold.\n")
-            if history is not None:
-                history.add(standalone, "[no results]")
             continue
 
         for i, doc in enumerate(chunks):
@@ -58,9 +51,6 @@ async def query(
         answer = await pipeline.generate_answer_async(standalone, chunks)
         result = await evaluator.evaluate(standalone, chunks, answer)
         result.print_summary()
-
-        if history is not None:
-            history.add(standalone, answer)
 
 
 if __name__ == "__main__":
