@@ -4,10 +4,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from langchain_core.messages import HumanMessage
-from langchain_core.tools import tool
 from pydantic import BaseModel
 
-from rag.vectorstores.base import SearchParams
 from backend.api import state
 
 router = APIRouter()
@@ -28,25 +26,6 @@ def _parse_job(item: dict) -> dict:
         "updated_at": item.get("updated_at", {}).get("S", ""),
         "error":      item.get("error", {}).get("S") or None,
     }
-
-
-@tool
-async def rag_search(query: str) -> str:
-    """Search the knowledge base using fusion RAG and return relevant chunks with scores."""
-    _, chunks = await state.searcher.search_async(query, params=SearchParams(top_k=4, use_hybrid=True))
-    if not chunks:
-        return "No relevant information found."
-    results = []
-    for doc in chunks:
-        score = doc.metadata.get("rrf_score") or doc.metadata.get("score", 0)
-        results.append({
-            "score":   score,
-            "type":    doc.metadata.get("chunk_type", "text"),
-            "page":    doc.metadata.get("page", ""),
-            "source":  doc.metadata.get("source", ""),
-            "content": doc.page_content,
-        })
-    return json.dumps(results)
 
 
 # ── Upload ─────────────────────────────────────────────────────────────────────

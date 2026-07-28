@@ -13,7 +13,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph_checkpoint_dynamodb.saver import DynamoDBSaver
 
 from backend.api import state
-from backend.api.routes import router, rag_search
+from backend.api.routes import router
+from backend.api.state import rag_search
 
 
 class AsyncDynamoDBSaver(DynamoDBSaver):
