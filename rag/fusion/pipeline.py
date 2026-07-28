@@ -39,10 +39,11 @@ class FusionRAGPipeline:
     ) -> tuple[str, list[Document]]:
         params = params or SearchParams()
         standalone, variants = await self.rewriter.rewrite(query, self.n_queries)
+        fusion_degraded = not variants  # rewriter returned no variants (LLM failure or empty response)
         if standalone != query:
             print(f"\n  [contextualize] '{query[:60]}' → '{standalone[:60]}'")
         all_queries = [standalone] + variants
-        if not variants:
+        if fusion_degraded:
             print(f"  [fusion] warning: no variants returned — running as single-query dense search")
 
         print(f"\n  [fusion] rewritten queries ({len(all_queries)} total):")
@@ -97,10 +98,11 @@ class FusionRAGPipeline:
             print(f"  {id_:<40} {rrf_scores[id_]:>10.6f}")
         print()
 
+        extra = {"fusion_degraded": True} if fusion_degraded else {}
         final_docs = [
             Document(
                 page_content=doc_lookup[id_].page_content,
-                metadata={**doc_lookup[id_].metadata, "rrf_score": round(rrf_scores[id_], 6)},
+                metadata={**doc_lookup[id_].metadata, "rrf_score": round(rrf_scores[id_], 6), **extra},
             )
             for id_ in top_ids
         ]
