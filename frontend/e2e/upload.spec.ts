@@ -39,7 +39,8 @@ test("clears file when X button clicked", async ({ page }) => {
     buffer: Buffer.from("%PDF-1.4"),
   });
   await expect(page.getByText("doc.pdf")).toBeVisible();
-  await page.locator("button").filter({ has: page.locator("svg") }).last().click();
-  // drop zone text reappears
-  await expect(page.getByText(/Drag & drop your file/)).toBeVisible();
+  // click the round X button to clear the selected file
+  await page.locator("button.rounded-full").click();
+  // Wait for the dropzone to reset
+  await expect(page.getByText(/Drag & drop/i)).toBeVisible();
 });

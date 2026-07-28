@@ -28,7 +28,7 @@ test("suggestion prompt fills textarea", async ({ page }) => {
 test("new chat button resets session", async ({ page }) => {
   await page.goto("/chat");
   const threadBefore = await page.locator("p.font-mono").textContent();
-  await page.getByRole("button", { name: /New chat/i }).click();
+  await page.getByRole("button", { name: /New chat/i }).first().click();
   const threadAfter = await page.locator("p.font-mono").textContent();
   expect(threadBefore).not.toBe(threadAfter);
 });
