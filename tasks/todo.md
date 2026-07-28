@@ -26,7 +26,7 @@
 ## Phase 5: Observability and Performance
 - [x] Task 12: Replace print with logging (#14) — all files; LOG_LEVEL env var; DEBUG for score tables, INFO for summaries, WARNING for degraded paths
 - [x] Task 13: DynamoDB Scan pagination (#17) — `routes.py`; added `Limit=50` to scan call
-- [ ] Task 14: Batch enrichment (#16) — `enricher.py`
+- [x] Task 14: Batch enrichment (#16) — `enricher.py`; children and parents processed in batches of `max_concurrency`
 - [ ] Task 15: Delete sync asyncio.run wrappers (#13) — `hybrid/pipeline.py`, `fusion/pipeline.py`
 - [ ] **Final checkpoint** — full pipeline smoke test, no print() in production code
 

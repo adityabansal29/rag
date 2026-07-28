@@ -84,8 +84,11 @@ class LLMEnricher:
         logger.info("[enricher] %d children: %d text (passthrough), %d non-text (LLM) across %d parents",
                     len(all_children), text_count, len(non_text), len(parent_chunks))
 
-        await asyncio.gather(*[self._enrich_child(child) for child in all_children])
-        await asyncio.gather(*[self._summarize_parent(parent) for parent in parent_chunks])
+        batch = self._max_concurrency
+        for i in range(0, len(all_children), batch):
+            await asyncio.gather(*[self._enrich_child(c) for c in all_children[i:i + batch]])
+        for i in range(0, len(parent_chunks), batch):
+            await asyncio.gather(*[self._summarize_parent(p) for p in parent_chunks[i:i + batch]])
 
         logger.info("[enricher] all %d parents summarized", len(parent_chunks))
 
