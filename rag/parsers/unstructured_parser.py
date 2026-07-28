@@ -42,7 +42,7 @@ class UnstructuredParser(BaseParser):
             # heading/title = new parent chunk
             if isinstance(elem, (Title, Header)):
                 current_parent = Chunk(
-                    id=Chunk.make_id(source, page, elem_index),
+                    id=Chunk.make_id(source, page, elem_index, content=elem.text),
                     parent_id=None,
                     chunk_type=ChunkType.TEXT,
                     metadata={
@@ -61,7 +61,7 @@ class UnstructuredParser(BaseParser):
             # no heading seen yet — create default parent
             if current_parent is None:
                 current_parent = Chunk(
-                    id=Chunk.make_id(source, 0, -1),
+                    id=Chunk.make_id(source, 0, -1, content="document_start"),
                     parent_id=None,
                     chunk_type=ChunkType.TEXT,
                     metadata={
@@ -99,7 +99,6 @@ class UnstructuredParser(BaseParser):
         index: int,
     ) -> Chunk | None:
 
-        chunk_id = Chunk.make_id(source, page, index)
         base_metadata = {
             "source":    source,
             "file_path": elem.metadata.filename or source,
@@ -109,26 +108,28 @@ class UnstructuredParser(BaseParser):
         element_type = type(elem).__name__
 
         if element_type == 'Table':
+            raw = elem.metadata.text_as_html or elem.text
             return Chunk(
-                id=chunk_id,
+                id=Chunk.make_id(source, page, index, content=raw),
                 parent_id=parent_id,
                 chunk_type=ChunkType.TABLE,
                 metadata=base_metadata,
-                raw_content=elem.metadata.text_as_html or elem.text,
+                raw_content=raw,
             )
 
         elif element_type == 'Image':
+            raw = elem.metadata.image_base64 or ""
             return Chunk(
-                id=chunk_id,
+                id=Chunk.make_id(source, page, index, content=raw[:128]),
                 parent_id=parent_id,
                 chunk_type=ChunkType.IMAGE,
                 metadata=base_metadata,
-                raw_content=elem.metadata.image_base64 or "",
+                raw_content=raw,
             )
 
         elif element_type == 'CodeSnippet':
             return Chunk(
-                id=chunk_id,
+                id=Chunk.make_id(source, page, index, content=elem.text),
                 parent_id=parent_id,
                 chunk_type=ChunkType.CODE,
                 metadata={
@@ -140,7 +141,7 @@ class UnstructuredParser(BaseParser):
 
         elif isinstance(elem, Text):
             return Chunk(
-                id=chunk_id,
+                id=Chunk.make_id(source, page, index, content=elem.text),
                 parent_id=parent_id,
                 chunk_type=ChunkType.TEXT,
                 metadata=base_metadata,

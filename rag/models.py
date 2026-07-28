@@ -43,8 +43,11 @@ class Chunk:
     children:          list[Chunk]    = field(default_factory=list)
 
     @staticmethod
-    def make_id(source: str, page: int, index: int) -> str:
-        key = f"{source}:{page}:{index}"
+    def make_id(source: str, page: int, index: int, content: str = "") -> str:
+        # Content hash ensures different content at the same position gets a different ID,
+        # preventing silent upsert overwrites when re-parsing with different settings.
+        content_hash = hashlib.md5(str(content).encode()).hexdigest()[:8]
+        key = f"{source}:{page}:{index}:{content_hash}"
         return hashlib.md5(key.encode()).hexdigest()
 
     def is_parent(self) -> bool:

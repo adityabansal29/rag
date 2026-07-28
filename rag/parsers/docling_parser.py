@@ -44,7 +44,7 @@ class DoclingParser(BaseParser):
             ):
                 heading_text = item.text if hasattr(item, "text") else str(item)
                 current_parent = Chunk(
-                    id=Chunk.make_id(source, page, elem_index),
+                    id=Chunk.make_id(source, page, elem_index, content=heading_text),
                     parent_id=None,
                     chunk_type=ChunkType.TEXT,
                     metadata={
@@ -64,7 +64,7 @@ class DoclingParser(BaseParser):
             # no heading seen yet
             if current_parent is None:
                 current_parent = Chunk(
-                    id=Chunk.make_id(source, 0, -1),
+                    id=Chunk.make_id(source, 0, -1, content="document_start"),
                     parent_id=None,
                     chunk_type=ChunkType.TEXT,
                     metadata={
@@ -106,7 +106,6 @@ class DoclingParser(BaseParser):
         index: int,
     ) -> Chunk | None:
 
-        chunk_id = Chunk.make_id(source, page, index)
         base_metadata = {
             "source":    source,
             "page":      page,
@@ -122,7 +121,7 @@ class DoclingParser(BaseParser):
         ):
             text = item.text if hasattr(item, "text") else str(item)
             return Chunk(
-                id=chunk_id,
+                id=Chunk.make_id(source, page, index, content=text),
                 parent_id=parent_id,
                 chunk_type=ChunkType.TEXT,
                 metadata=base_metadata,
@@ -133,8 +132,9 @@ class DoclingParser(BaseParser):
         if label == DocItemLabel.TABLE:
             html = item.export_to_html() if hasattr(item, "export_to_html") else ""
             markdown = item.export_to_markdown() if hasattr(item, "export_to_markdown") else ""
+            raw = html or markdown
             return Chunk(
-                id=chunk_id,
+                id=Chunk.make_id(source, page, index, content=raw),
                 parent_id=parent_id,
                 chunk_type=ChunkType.TABLE,
                 metadata={
@@ -142,14 +142,14 @@ class DoclingParser(BaseParser):
                     "html":     html,
                     "markdown": markdown,
                 },
-                raw_content=html or markdown,
+                raw_content=raw,
             )
 
         # picture / image
         if label == DocItemLabel.PICTURE:
             b64 = self._extract_image_b64(item)
             return Chunk(
-                id=chunk_id,
+                id=Chunk.make_id(source, page, index, content=b64[:128]),
                 parent_id=parent_id,
                 chunk_type=ChunkType.IMAGE,
                 metadata=base_metadata,
@@ -160,7 +160,7 @@ class DoclingParser(BaseParser):
         if label == DocItemLabel.CODE:
             text = item.text if hasattr(item, "text") else str(item)
             return Chunk(
-                id=chunk_id,
+                id=Chunk.make_id(source, page, index, content=text),
                 parent_id=parent_id,
                 chunk_type=ChunkType.CODE,
                 metadata={
