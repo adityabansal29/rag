@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from rag.hybrid.pipeline import HybridRAGPipeline
 from rag.fusion.pipeline import FusionRAGPipeline
 from rag.rerankers.cross_encoder import CrossEncoderReranker
+from rag.vectorstores.base import BaseVectorStore
 
 load_dotenv(override=True)
 
@@ -31,7 +32,18 @@ s3 = boto3.client(
 sqs    = boto3.client("sqs",      region_name=AWS_REGION)
 dynamo = boto3.client("dynamodb", region_name=AWS_REGION)
 
-_hybrid  = HybridRAGPipeline(reranker=CrossEncoderReranker())
+def _build_vectorstore() -> BaseVectorStore:
+    api_key = os.getenv("PINECONE_API_KEY")
+    if api_key:
+        from rag.vectorstores.pinecone_store import PineconeVectorStore
+        return PineconeVectorStore(
+            api_key=api_key,
+            index_name=os.getenv("PINECONE_INDEX_NAME", "rag-pipeline"),
+        )
+    from rag.vectorstores.chroma_store import ChromaVectorStore
+    return ChromaVectorStore()
+
+_hybrid  = HybridRAGPipeline(vectorstore=_build_vectorstore(), reranker=CrossEncoderReranker())
 searcher = FusionRAGPipeline(_hybrid, n_queries=2)
 
 # set during lifespan

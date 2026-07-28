@@ -18,7 +18,20 @@ AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 s3  = boto3.client("s3",  region_name=AWS_REGION)
 sqs = boto3.client("sqs", region_name=AWS_REGION)
 
-pipeline = HybridRAGPipeline()
+
+def _build_vectorstore():
+    api_key = os.getenv("PINECONE_API_KEY")
+    if api_key:
+        from rag.vectorstores.pinecone_store import PineconeVectorStore
+        return PineconeVectorStore(
+            api_key=api_key,
+            index_name=os.getenv("PINECONE_INDEX_NAME", "rag-pipeline"),
+        )
+    from rag.vectorstores.chroma_store import ChromaVectorStore
+    return ChromaVectorStore()
+
+
+pipeline = HybridRAGPipeline(vectorstore=_build_vectorstore())
 
 
 def _process(msg: dict) -> None:
