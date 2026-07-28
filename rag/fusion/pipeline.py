@@ -9,6 +9,21 @@ from rag.fusion.query_rewriter import QueryRewriter
 from rag.utils.rrf import rrf_fuse
 
 
+def _fusion_search_params(params: SearchParams, n_queries: int, use_hybrid: bool) -> tuple[SearchParams, SearchParams | None]:
+    """Return (dense_params, bm25_params) tuned for fusion retrieval.
+
+    Fusion inflates top_k so the RRF merge has enough candidates across N queries.
+    Score thresholds are cleared here — fusion's outer RRF does its own ranking,
+    so per-query filtering would silently drop valid candidates before the merge.
+    """
+    inflated = params.top_k * n_queries
+    dense = replace(params, top_k=inflated, cosine_threshold=None, rrf_score_threshold=None, use_hybrid=False)
+    if use_hybrid:
+        bm25 = replace(params, top_k=inflated, rrf_score_threshold=None, use_hybrid=False)
+        return dense, bm25
+    return dense, None
+
+
 class FusionRAGPipeline:
     """
     Fusion RAG: rewrites the query into n variations, searches in parallel,
@@ -51,13 +66,10 @@ class FusionRAGPipeline:
             label = "original" if i == 0 else f"variant {i}"
             print(f"    [{label}] {q}")
 
-        inflated_top_k = params.top_k * len(all_queries)
+        dense_params, bm25_params = _fusion_search_params(params, len(all_queries), params.use_hybrid)
 
-        if params.use_hybrid:
+        if bm25_params is not None:
             # BM25 once on standalone + dense on every variant — merged in outer RRF
-            bm25_params   = replace(params, top_k=inflated_top_k, rrf_score_threshold=None, use_hybrid=False)
-            dense_params  = replace(params, top_k=inflated_top_k, cosine_threshold=None, rrf_score_threshold=None, use_hybrid=False)
-
             bm25_results, *dense_results = await asyncio.gather(
                 self.pipeline.bm25_search_async(standalone, bm25_params),
                 *[self.pipeline.dense_search_async(q, dense_params) for q in all_queries],
@@ -66,7 +78,6 @@ class FusionRAGPipeline:
                 (f"dense:{q[:40]}", docs) for q, docs in zip(all_queries, dense_results)
             ]
         else:
-            dense_params = replace(params, top_k=inflated_top_k, cosine_threshold=None, rrf_score_threshold=None)
             dense_results = await asyncio.gather(*[
                 self.pipeline.dense_search_async(q, dense_params) for q in all_queries
             ])
