@@ -36,15 +36,17 @@ async def rag_search(query: str) -> str:
     _, chunks = await state.searcher.search_async(query, params=SearchParams(top_k=4, use_hybrid=True))
     if not chunks:
         return "No relevant information found."
-    parts = []
-    for i, doc in enumerate(chunks):
+    results = []
+    for doc in chunks:
         score = doc.metadata.get("rrf_score") or doc.metadata.get("score", 0)
-        parts.append(
-            f"[{i+1}] score={score} type={doc.metadata.get('chunk_type', 'text')} "
-            f"page={doc.metadata.get('page', '')} source={doc.metadata.get('source', '')}\n"
-            f"{doc.page_content}"
-        )
-    return "\n\n".join(parts)
+        results.append({
+            "score":   score,
+            "type":    doc.metadata.get("chunk_type", "text"),
+            "page":    doc.metadata.get("page", ""),
+            "source":  doc.metadata.get("source", ""),
+            "content": doc.page_content,
+        })
+    return json.dumps(results)
 
 
 # ── Upload ─────────────────────────────────────────────────────────────────────
@@ -135,21 +137,18 @@ async def chat(req: ChatRequest):
     sources = []
     for msg in result["messages"]:
         if getattr(msg, "name", None) == "rag_search":
-            for block in msg.content.split("\n\n"):
-                if not block.startswith("["):
-                    continue
-                try:
-                    header, *body_lines = block.split("\n")
-                    kv = dict(p.split("=", 1) for p in header.split() if "=" in p)
+            try:
+                items = json.loads(msg.content)
+                for item in items:
                     sources.append({
-                        "content": "\n".join(body_lines).strip(),
-                        "score":   float(kv.get("score", 0)),
-                        "type":    kv.get("type", ""),
-                        "page":    kv.get("page", ""),
-                        "source":  kv.get("source", ""),
+                        "content": item.get("content", ""),
+                        "score":   float(item.get("score", 0)),
+                        "type":    item.get("type", ""),
+                        "page":    item.get("page", ""),
+                        "source":  item.get("source", ""),
                     })
-                except Exception:
-                    pass
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                pass  # tool returned the no-results sentinel string
 
     return {"answer": answer, "sources": sources}
 
