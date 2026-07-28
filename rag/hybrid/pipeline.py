@@ -24,6 +24,7 @@ def chunks_to_langchain_docs(parent_chunks: list[Chunk]) -> list[Document]:
     docs: list[Document] = []
 
     for parent in parent_chunks:
+        parent_summary = parent.retrieved_content or ""
         for child in parent.children:
             if not child.embedding_content:
                 continue
@@ -34,6 +35,7 @@ def chunks_to_langchain_docs(parent_chunks: list[Chunk]) -> list[Document]:
                     "chunk_id":        child.id,
                     "parent_id":       child.parent_id,
                     "chunk_type":      child.chunk_type.value,
+                    "parent_summary":  parent_summary,
                     **({"raw_content": str(child.raw_content or "")} if child.chunk_type != ChunkType.TEXT else {}),
                     **{k: v for k, v in child.metadata.items()
                        if isinstance(v, (str, int, float, bool))},
@@ -207,7 +209,14 @@ class HybridRAGPipeline:
 
     async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
         print(f"\n  [generate] query='{query[:80]}'  context_chunks={len(chunks)}")
-        context = "\n\n".join(f"[{i+1}] {doc.page_content}" for i, doc in enumerate(chunks))
+        parts = []
+        for i, doc in enumerate(chunks):
+            block = f"[{i+1}] {doc.page_content}"
+            summary = doc.metadata.get("parent_summary", "")
+            if summary:
+                block = f"[{i+1}] [Section context: {summary}]\n{doc.page_content}"
+            parts.append(block)
+        context = "\n\n".join(parts)
         answer = await self.enricher.llm.call_text(
             system_prompt=(
                 "You are a helpful assistant. Answer the question using only the provided context. "
