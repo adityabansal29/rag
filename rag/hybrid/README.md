@@ -4,11 +4,11 @@
 
 Dense search retrieves by cosine similarity in embedding space. It captures semantic meaning well — "automobile" and "car" are close — but has blind spots:
 
-- **Rare terms**: model names, identifiers, technical jargon that wasn't well-represented in training data embed poorly
+- **Rare terms**: model names, identifiers, and technical jargon that wasn't well-represented in training data embed poorly
 - **Exact keyword recall**: a query for "hinted handoff" may semantically match vague "availability" chunks instead of the specific section that uses those exact words
 - **Short, specific queries**: a 3-word query embedding may not capture intent as well as direct term matching
 
-BM25 covers these gaps but has its own blind spots — it requires exact term overlap and has no notion of meaning. Hybrid search combines both.
+BM25 covers these gaps but requires exact term overlap and has no notion of meaning. Hybrid search combines both.
 
 ---
 
@@ -24,8 +24,8 @@ Document
 [Chunker]      → merge small / split large text chunks (100–512 tokens)
   │              non-text chunks (table, image, code) preserved as-is
   ▼
-[LLM Enricher] → describe images, summarize tables/code, summarize parent sections
-  │
+[LLM Enricher] → describe images · summarize tables/code · summarize parent sections
+  │              (async batched, semaphore-bounded concurrency)
   ▼
 [Embedder]     → OpenAI text-embedding-3-small (default)
   │
@@ -36,13 +36,30 @@ Document
 query
   │
   ├─→ BM25 (keyword ranking over full corpus)  ──┐
-  │                                               ├─→ RRF merge → top_k candidates
+  │                                              ├─→ RRF merge → top_k candidates
   └─→ Dense (cosine similarity via embedding)  ──┘
                                                          │
                                                   [Re-ranker]   ← optional
                                                          │
-                                                     top_k chunks → answer
+                                                     top_k chunks
 ```
+
+---
+
+## Parent-Document Retrieval
+
+Documents are chunked into a parent-child hierarchy:
+
+```
+Parent (section heading / page)
+├── Child 1  (text paragraph)
+├── Child 2  (table → LLM summary)
+└── Child 3  (image → LLM description)
+```
+
+**Only children are embedded.** This keeps embeddings focused on specific content rather than verbose section context, improving retrieval precision.
+
+**At generation time**, each child carries `parent_summary` in its metadata — the LLM-generated summary of its parent section, produced during enrichment. The `generate_answer` helper injects this as `[Section context: ...]` above the chunk content, giving the model both the specific retrieved passage and its broader section context without polluting the embedding space.
 
 ---
 
@@ -85,31 +102,29 @@ Chroma fetches the full corpus on every hybrid search because it has no native s
 
 ## Re-ranker (optional)
 
-BM25 and dense search both rank by a single score per document — cosine similarity or BM25 score. Neither considers the query and document **together**: they rank independently and merge. A cross-encoder re-ranker fixes this.
+BM25 and dense search both rank by a single score per document independently — they don't consider the query and candidate document *together*. A cross-encoder re-ranker fixes this.
 
-A cross-encoder reads the query and each candidate document jointly and produces a relevance score that captures their interaction. This is more expensive (one inference per candidate) but significantly more accurate. Because re-ranking only runs on the top_k candidates already retrieved, the cost is bounded.
+A cross-encoder reads the query and each candidate document jointly and produces a relevance score that captures their interaction. It's more expensive (one inference per candidate) but significantly more accurate. Since it only runs on the top candidates already retrieved, the cost is bounded.
 
 ```
 BM25 + Dense → RRF → top_k candidates → [CrossEncoder] → re-scored, re-ordered top_k
 ```
 
-Two implementations are provided:
+Two implementations:
 
 | Class | Backend | Cost | Notes |
 |-------|---------|------|-------|
 | `CrossEncoderReranker` | sentence-transformers (local) | free, GPU optional | `ms-marco-MiniLM-L-6-v2` default |
 | `CohereReranker` | Cohere API | per-call | `rerank-english-v3.0` default |
 
-The re-ranker is injected at construction and applied transparently after every `search_async()` call. Pass `reranker=None` (default) to skip it.
-
-Both re-rankers add a `rerank_score` field to each returned document's metadata.
+The re-ranker is injected at construction and applied transparently after every `search_async()` call. Pass `reranker=None` (default) to skip it. Both re-rankers add a `rerank_score` field to each returned document's metadata.
 
 ---
 
 ## Usage
 
 ```python
-from rag.hybrid.pipeline import HybridRAGPipeline
+from rag.hybrid.pipeline import HybridRAGPipeline, generate_answer
 from rag.rerankers.cross_encoder import CrossEncoderReranker
 from rag.vectorstores.base import SearchParams
 
@@ -124,14 +139,22 @@ pipeline = HybridRAGPipeline(
 # Ingest
 await pipeline.run_async("paper.pdf", parser="unstructured")
 
-# Dense-only search (re-ranker applies if set)
-chunks = await pipeline.search_async("How does hinted handoff work?",
-                                     params=SearchParams(top_k=5))
+# Dense-only search
+_, chunks = await pipeline.search_async(
+    "How does hinted handoff work?",
+    params=SearchParams(top_k=5),
+)
 
-# Hybrid search (BM25 + dense + RRF, then re-rank)
-chunks = await pipeline.search_async("How does hinted handoff work?",
-                                     params=SearchParams(top_k=5, use_hybrid=True))
+# Hybrid search (BM25 + dense + RRF, then re-rank if set)
+_, chunks = await pipeline.search_async(
+    "How does hinted handoff work?",
+    params=SearchParams(top_k=5, use_hybrid=True),
+)
 
-# Generate answer
-answer = await pipeline.generate_answer_async("How does hinted handoff work?", chunks)
+# Generate answer (parent_summary injected into context automatically)
+answer = await generate_answer(
+    pipeline.enricher.llm,
+    "How does hinted handoff work?",
+    chunks,
+)
 ```

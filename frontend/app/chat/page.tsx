@@ -235,6 +235,7 @@ export default function ChatPage() {
             />
           </div>
           <button
+            aria-label="Send message"
             onClick={send}
             disabled={!input.trim() || loading}
             className="shrink-0 h-12 w-12 rounded-2xl gradient-primary-btn text-white flex items-center justify-center shadow-sm"

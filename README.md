@@ -1,151 +1,132 @@
-# RAG Pipeline
+# Production RAG System
 
-A full-stack RAG system with document ingestion, hybrid/fusion search, and a conversational agent UI.
+A full-stack document QA system implementing advanced RAG patterns end-to-end: **hybrid BM25 + dense retrieval with RRF**, **RAG-Fusion with LLM query rewriting**, **cross-encoder re-ranking**, **parent-document retrieval with hierarchical chunking**, and a **multi-turn conversational agent** with persistent memory via LangGraph.
 
-## Structure
+---
+
+## System Overview
 
 ```
-rag/          # Python library — parsers, chunkers, embedders, vector stores, pipelines
-backend/      # FastAPI API + SQS worker + LangGraph agent
+                         ┌──────────────────────────────────────┐
+                         │             Browser                  │
+                         │    Upload · Jobs · Chat              │
+                         └────────────┬────────────┬────────────┘
+                                      │            │
+          ─── INGESTION ──────────────┘            └── CHAT ───
+                                                                               
+  Browser → S3 presigned PUT                   POST /chat                      
+         → POST /notify                              │                         
+         → DynamoDB (queued) + SQS            LangGraph ReAct agent            
+                     │                               │                         
+                SQS Worker                     rag_search tool                 
+                     │                               │                         
+   parse → chunk → LLM-enrich → embed         FusionRAGPipeline               
+                     │                               │                         
+           Chroma / Pinecone / Qdrant        QueryRewriter  (1 LLM call)       
+                     ▲                               │                         
+                     │              BM25(standalone) + dense(all variants)    
+                     │                               │                         
+                     └───────────────────── Outer RRF merge                   
+                                                     │                         
+                                            [CrossEncoder re-rank]             
+                                                     │                         
+                                            top_k chunks → LLM answer         
+```
+
+---
+
+## Advanced RAG Techniques
+
+| Technique | Where |
+|-----------|-------|
+| **Hybrid retrieval** — BM25 + dense vectors fused with Reciprocal Rank Fusion | `rag/hybrid/` |
+| **RAG-Fusion** — query rewriting + parallel multi-query search + outer RRF | `rag/fusion/` |
+| **Cross-encoder re-ranking** — sentence-transformers (local) or Cohere API | `rag/rerankers/` |
+| **Parent-document retrieval** — children indexed for precision, parent context injected at generation | `rag/chunkers/`, `rag/enrichers/` |
+| **Hierarchical chunking** — merge small / split large text (100–512 tokens); non-text preserved | `rag/chunkers/` |
+| **Contextual chunk enrichment** — LLM captioning for images, tables, and code blocks | `rag/enrichers/` |
+| **LangGraph ReAct agent** — tool-calling loop with thread-persistent conversation memory | `backend/api/` |
+| **Multi-vector store** — Chroma, Pinecone, Qdrant via swappable interface | `rag/vectorstores/` |
+| **LLM-as-evaluator** — chunk relevance + answer faithfulness scoring | `rag/evaluators/` |
+| **Multi-provider LLM** — OpenAI, Anthropic, Gemini via unified client interface | `rag/llm/` |
+| **Async SQS-driven ingestion** — decoupled upload → process pipeline | `backend/worker/` |
+
+---
+
+## Stack
+
+**Backend** Python 3.11 · FastAPI · LangGraph · LangChain · asyncio  
+**Ingestion** AWS S3 · SQS · DynamoDB  
+**Embeddings** OpenAI `text-embedding-3-small`  
+**Vector stores** Chroma (default) · Pinecone · Qdrant  
+**Re-rankers** `ms-marco-MiniLM-L-6-v2` (local) · Cohere `rerank-english-v3.0` (API)  
+**LLM** OpenAI GPT-4o · Anthropic Claude · Google Gemini  
+**Frontend** Next.js 16 · TypeScript · Tailwind CSS  
+
+---
+
+## Project Layout
+
+```
+rag/          # core library — parsers, chunkers, enrichers, embedders, pipelines
+backend/      # FastAPI + SQS worker + LangGraph agent
 frontend/     # Next.js UI — upload, job tracking, chat
+tests/        # pytest suite
 ```
 
-## Architecture
-
-### Ingestion (S3 → SQS → Worker → Vector Store)
-
-```
-Upload (browser)
-  → S3 presigned PUT
-  → POST /notify  → DynamoDB job (queued) + SQS message
-  → SQS worker    → download → pipeline → DynamoDB step progress
-```
-
-Pipeline steps:
-
-```
-[Parser]       → unstructured or docling
-[Chunker]      → merge small / split large text chunks (100–512 tokens)
-               non-text chunks (table, image, code, diagram) preserved as-is
-[LLM Enricher] → describe images, summarize tables/code, summarize parent sections
-[Embedder]     → OpenAI text-embedding-3-small
-[Vector Store] → Chroma (local) · Pinecone · Qdrant
-```
-
-### Retrieval — Hybrid
-
-```
-query
-  ├── BM25 retrieval  ──┐
-  └── Dense retrieval ──┴─→ RRF merge → [CrossEncoder re-ranker] → top_k chunks
-```
-
-### Retrieval — Fusion
-
-```
-query
-  → QueryRewriter  → standalone + n variants (1 LLM call)
-  ├── BM25(standalone)  ─────────────────────────┐
-  ├── dense(standalone) ──┐                      │
-  ├── dense(variant 1)   ─┤  all parallel        │
-  └── dense(variant n)   ─┘                      │
-                           └────────────── outer RRF merge → [re-ranker] → top_k
-```
-
-Fusion is used for chat. BM25 runs once on the standalone query; dense runs per variant to maximize semantic coverage without polluting BM25 signal.
-
-### Chat
-
-LangGraph ReAct agent with a `rag_search` tool (FusionRAG). Conversation history is managed via a LangGraph checkpointer (DynamoDB in production, SQLite in dev) keyed by `thread_id`. The client stores `thread_id` in `sessionStorage` — stateless client, stateful server.
-
-### Chunk hierarchy
-
-```
-Parent (section heading)
-├── Child 1  (text)
-├── Child 2  (table → LLM summary)
-└── Child 3  (image → LLM description)
-```
-
-Only children are embedded. The parent's section title is prepended to each child's embedding content. Parent summaries are stored and injected at generation time, not into embeddings.
+---
 
 ## Setup
 
-```bash
-# Python (from repo root)
-uv sync
-uv pip install -e .
+**Prerequisites:** Python 3.12+, Node.js 18+, [uv](https://docs.astral.sh/uv/getting-started/installation/), AWS account, OpenAI API key.
 
-# Frontend
+```bash
+uv sync && uv pip install -e .
 cd frontend && npm install
 ```
 
-Copy `.env.example` to `.env` and fill in:
+Copy `.env.example` to `.env`:
 
 ```
-OPENAI_API_KEY=
-AWS_REGION=
-S3_BUCKET=
-SQS_QUEUE_URL=
+OPENAI_API_KEY=sk-...
+
+AWS_REGION=us-east-1
+S3_BUCKET=your-bucket
+SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123/your-queue
 DYNAMO_TABLE=rag-jobs
-LANGGRAPH_CHECKPOINTER=dynamodb        # or sqlite for dev
+
+LANGGRAPH_CHECKPOINTER=sqlite        # or dynamodb for prod
+CHECKPOINTER_DB=./chat_history.db    # sqlite only
 CHAT_CHECKPOINTS_TABLE=rag-chat-checkpoints
 CHAT_WRITES_TABLE=rag-chat-writes
-```
 
-Create DynamoDB tables:
+PRESIGNED_EXPIRY_SECONDS=900         # optional, default 15 min
+```
 
 ```bash
-python backend/scripts/setup_dynamo.py
+python backend/scripts/setup_dynamo.py   # creates rag-jobs, rag-chat-checkpoints, rag-chat-writes
 ```
 
-## Running
+## Run
 
 ```bash
-bash run.sh api      # FastAPI on :8000
-bash run.sh worker   # SQS listener
-bash run.sh ui       # Next.js on :3000
+bash run.sh api       # FastAPI on :8000
+bash run.sh worker    # SQS polling loop
+bash run.sh ui        # Next.js on :3000
 
-bash run.sh upload ./paper.pdf   # presign → PUT S3 → notify API
+bash run.sh upload ./paper.pdf   # upload a document from the CLI
 ```
 
-## Modules
+---
 
-| Module | Description |
-|--------|-------------|
-| `rag/hybrid/pipeline.py` | `HybridRAGPipeline` — ingestion + hybrid search + answer generation |
-| `rag/fusion/pipeline.py` | `FusionRAGPipeline` — query rewriting + parallel hybrid + outer RRF |
-| `rag/fusion/query_rewriter.py` | `QueryRewriter` — rewrites query into n semantic variants |
-| `rag/evaluators/llm_evaluator.py` | `LLMEvaluator` — chunk relevance + answer faithfulness scoring |
-| `rag/parsers/` | `UnstructuredParser`, `DoclingParser` |
-| `rag/chunkers/chunker.py` | Token-aware merge/split |
-| `rag/enrichers/enricher.py` | `LLMEnricher` — async LLM enrichment + `build_embedding_content` |
-| `rag/embedders/` | `OpenAIEmbedder`, `BaseEmbedder` |
-| `rag/vectorstores/` | `ChromaVectorStore`, `PineconeVectorStore`, `QdrantVectorStore` |
-| `rag/rerankers/` | `CrossEncoderReranker` (local), `CohereReranker` (API) |
-| `rag/llm/` | `OpenAILLMClient`, `AnthropicLLMClient`, `GeminiLLMClient` |
-| `rag/utils/rrf.py` | `rrf_fuse()` — Reciprocal Rank Fusion |
-| `backend/api/app.py` | FastAPI lifespan — LangGraph agent init |
-| `backend/api/routes.py` | API endpoints: presign, notify, jobs, chat, health |
-| `backend/api/state.py` | Shared AWS clients + pipeline + agent ref |
-| `backend/worker/sqs_listener.py` | SQS polling loop |
-| `backend/worker/job_tracker.py` | DynamoDB step progress tracker |
-| `backend/scripts/setup_dynamo.py` | Create DynamoDB tables |
+## Retrieval
 
-## Vector stores
+See [`rag/hybrid/README.md`](rag/hybrid/README.md) for hybrid BM25 + dense search, RRF merging, and re-ranking.
 
-| Store | Hybrid search | Notes |
-|-------|--------------|-------|
-| Chroma | In-memory BM25Retriever + RRF | Full corpus per query — fine for small corpora |
-| Pinecone | Native sparse-dense + alpha weighting | Requires `dotproduct` metric index |
-| Qdrant | Native fastembed BM25 + built-in RRF | In-memory, local path, or remote |
+See [`rag/fusion/README.md`](rag/fusion/README.md) for query rewriting, multi-query fusion, and why BM25 runs exactly once.
 
-## LLM clients
+---
 
-```python
-from rag.llm.base import build_llm_client
+## Conversational Agent
 
-llm = build_llm_client("anthropic", model="claude-opus-4-8")
-llm = build_llm_client("gemini",    model="gemini-2.0-flash")
-llm = build_llm_client("openai",    model="gpt-4o")  # default
-```
+A LangGraph ReAct agent exposes `rag_search` (a LangChain `@tool` wrapping `FusionRAGPipeline`) and loops until it has enough context to answer. Conversation history is maintained by a LangGraph checkpointer — DynamoDB in production, SQLite in dev — keyed by `thread_id`. The browser stores `thread_id` in `sessionStorage`: stateless client, stateful server.
