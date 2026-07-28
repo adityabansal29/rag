@@ -96,10 +96,10 @@ def notify(req: NotifyRequest):
 
 @router.get("/jobs")
 def list_jobs():
-    resp = state.dynamo.scan(TableName=state.DYNAMO_TABLE)
+    resp = state.dynamo.scan(TableName=state.DYNAMO_TABLE, Limit=50)
     jobs = [_parse_job(item) for item in resp.get("Items", [])]
     jobs.sort(key=lambda j: j["created_at"], reverse=True)
-    return jobs[:50]
+    return jobs
 
 
 @router.get("/job/{job_id}")
