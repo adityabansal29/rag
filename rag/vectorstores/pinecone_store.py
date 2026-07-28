@@ -1,6 +1,10 @@
+import logging
+
 from pinecone import Pinecone, ServerlessSpec
 from pinecone_text.sparse import BM25Encoder
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
 
 from rag.vectorstores.base import BaseVectorStore, SearchParams
 
@@ -108,14 +112,12 @@ class PineconeVectorStore(BaseVectorStore):
         is_hybrid = sparse_vector is not None
         # ponytail: dotproduct scores are unnormalized — cosine_threshold is meaningless in hybrid mode
         apply_threshold = not is_hybrid and params.cosine_threshold is not None
-        label = f"Pinecone {'Hybrid' if is_hybrid else 'Dense'} Results (alpha={alpha if is_hybrid else 'n/a'})"
-        print(f"\n  {label}")
-        print(f"  {'#':<5} {'Chunk ID':<40} {'Score':>10} {'Status':>10}")
-        print(f"  {'-'*5} {'-'*40} {'-'*10} {'-'*10}")
-        for i, match in enumerate(results["matches"]):
-            status = "kept" if (not apply_threshold or match["score"] >= params.cosine_threshold) else "filtered"
-            print(f"  {i:<5} {match['id']:<40} {match['score']:>10.6f} {status:>10}")
-        print()
+        label = "Hybrid" if is_hybrid else "Dense"
+        logger.debug("Pinecone %s search: alpha=%s", label, alpha if is_hybrid else "n/a")
+        if logger.isEnabledFor(logging.DEBUG):
+            for i, match in enumerate(results["matches"]):
+                status = "kept" if (not apply_threshold or match["score"] >= params.cosine_threshold) else "filtered"
+                logger.debug("  [%d] %s score=%.6f %s", i, match['id'], match['score'], status)
 
         docs = []
         for match in results["matches"]:
@@ -153,12 +155,9 @@ class PineconeVectorStore(BaseVectorStore):
             namespace=self.namespace,
         )
 
-        print(f"\n  Pinecone BM25 Results")
-        print(f"  {'#':<5} {'Chunk ID':<40} {'Score':>10}")
-        print(f"  {'-'*5} {'-'*40} {'-'*10}")
-        for i, match in enumerate(results["matches"]):
-            print(f"  {i:<5} {match['id']:<40} {match['score']:>10.6f}")
-        print()
+        if logger.isEnabledFor(logging.DEBUG):
+            for i, match in enumerate(results["matches"]):
+                logger.debug("  BM25 [%d] %s score=%.6f", i, match['id'], match['score'])
 
         docs = []
         for match in results["matches"]:

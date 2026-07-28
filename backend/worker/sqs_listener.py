@@ -1,8 +1,11 @@
 import asyncio
 import json
+import logging
 import os
 import signal
 import tempfile
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -32,7 +35,7 @@ async def _process(msg: dict) -> None:
     try:
         await pipeline.run_async(tmp_path, on_step=tracker.on_step)
         tracker.finish()
-        print(f"[worker] indexed: {key}")
+        logger.info("[worker] indexed: %s", key)
     except Exception as e:
         tracker.fail(str(e))
         raise
@@ -45,13 +48,13 @@ async def listen() -> None:
 
     def _handle_signal(signum, frame):
         nonlocal shutdown
-        print(f"[worker] signal {signum} received — draining current message then exiting")
+        logger.info("[worker] signal %s received — draining current message then exiting", signum)
         shutdown = True
 
     signal.signal(signal.SIGINT,  _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    print(f"[worker] polling {QUEUE_URL}")
+    logger.info("[worker] polling %s", QUEUE_URL)
     while not shutdown:
         resp = await asyncio.to_thread(
             sqs.receive_message,
@@ -63,7 +66,7 @@ async def listen() -> None:
             try:
                 await _process(msg)
             except Exception as e:
-                print(f"[worker] error processing {msg['MessageId']}: {e}")
+                logger.error("[worker] error processing %s: %s", msg['MessageId'], e)
             finally:
                 # Always delete — on failure, SQS would re-deliver indefinitely otherwise.
                 await asyncio.to_thread(
@@ -74,4 +77,5 @@ async def listen() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
     asyncio.run(listen())

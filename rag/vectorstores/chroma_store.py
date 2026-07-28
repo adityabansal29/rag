@@ -1,6 +1,10 @@
+import logging
+
 import chromadb
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
 
 from rag.vectorstores.base import BaseVectorStore, SearchParams
 from rag.utils.rrf import rrf_fuse
@@ -95,23 +99,19 @@ class ChromaVectorStore(BaseVectorStore):
             n_results=params.top_k,
             where=params.metadata_filters,
         )
-        print(f"\n  Chroma Dense Results  threshold={params.cosine_threshold}")
-        print(f"  {'#':<5} {'Chunk ID':<40} {'Score':>8} {'Status':>10}")
-        print(f"  {'-'*5} {'-'*40} {'-'*8} {'-'*10}")
+        logger.debug("Chroma dense search: threshold=%s", params.cosine_threshold)
         docs = []
         for i, text in enumerate(results["documents"][0]):
             similarity = 1 - results["distances"][0][i]
             chunk_id = results["metadatas"][0][i].get("chunk_id", "?")
             kept = params.cosine_threshold is None or similarity >= params.cosine_threshold
-            status = "kept" if kept else "filtered"
-            print(f"  {i:<5} {str(chunk_id):<40} {similarity:>8.4f} {status:>10}")
+            logger.debug("  [%d] chunk=%s score=%.4f %s", i, chunk_id, similarity, "kept" if kept else "filtered")
             if not kept:
                 continue
             docs.append(Document(
                 page_content=text,
                 metadata={**results["metadatas"][0][i], "score": round(similarity, 4)},
             ))
-        print()
         return docs
 
     def bm25_search(
@@ -127,18 +127,14 @@ class ChromaVectorStore(BaseVectorStore):
         results = bm25.invoke(query_text)
 
         corpus_size = self.collection.count()
-        print(f"\n  BM25 Rankings  corpus={corpus_size}")
-        print(f"  {'#':<5} {'Chunk ID':<40} {'RRF Score':>10} {'Status':>10}")
-        print(f"  {'-'*5} {'-'*40} {'-'*10} {'-'*10}")
+        logger.debug("BM25 rankings: corpus=%d", corpus_size)
         docs = []
         for rank, doc in enumerate(results):
             rrf = 1 / (60 + rank)
             kept = params.rrf_score_threshold is None or rrf >= params.rrf_score_threshold
-            status = "kept" if kept else "filtered"
-            print(f"  {rank:<5} {str(doc.metadata.get('chunk_id','?')):<40} {rrf:>10.6f} {status:>10}")
+            logger.debug("  [%d] chunk=%s rrf=%.6f %s", rank, doc.metadata.get('chunk_id', '?'), rrf, "kept" if kept else "filtered")
             if kept:
                 docs.append(doc)
-        print()
         return docs
 
     def _hybrid_search(
@@ -153,7 +149,7 @@ class ChromaVectorStore(BaseVectorStore):
         langchain_docs, all_docs = self._get_bm25_corpus(params.metadata_filters)
         if not all_docs["ids"]:
             return []
-        print(f"\n  [chroma hybrid] corpus={len(all_docs['ids'])} docs  top_k={params.top_k}  rrf_threshold={params.rrf_score_threshold}")
+        logger.debug("[chroma hybrid] corpus=%d docs top_k=%d rrf_threshold=%s", len(all_docs['ids']), params.top_k, params.rrf_score_threshold)
 
         doc_lookup = {
             meta["chunk_id"]: (text, meta)
@@ -174,12 +170,10 @@ class ChromaVectorStore(BaseVectorStore):
             for rank, doc in enumerate(bm25_results)
         }
 
-        print(f"\n  {'BM25 Rankings':}")
-        print(f"  {'#':<5} {'Chunk ID':<40} {'RRF Score':>10}")
-        print(f"  {'-'*5} {'-'*40} {'-'*10}")
-        for id_, rank in sorted(bm25_rank.items(), key=lambda x: x[1]):
-            rrf = 1 / (60 + rank)
-            print(f"  {rank:<5} {id_:<40} {rrf:>10.6f}")
+        if logger.isEnabledFor(logging.DEBUG):
+            for id_, rank in sorted(bm25_rank.items(), key=lambda x: x[1]):
+                rrf = 1 / (60 + rank)
+                logger.debug("  BM25 [%d] %s rrf=%.6f", rank, id_, rrf)
 
         # dense search
         n = min(params.top_k, len(all_docs["ids"]))
@@ -191,12 +185,10 @@ class ChromaVectorStore(BaseVectorStore):
         dense_ids = dense_results["ids"][0]
         dense_rank = {id_: rank for rank, id_ in enumerate(dense_ids)}
 
-        print(f"\n  {'Vector Rankings':}")
-        print(f"  {'#':<5} {'Chunk ID':<40} {'RRF Score':>10}")
-        print(f"  {'-'*5} {'-'*40} {'-'*10}")
-        for id_, rank in sorted(dense_rank.items(), key=lambda x: x[1]):
-            rrf = 1 / (60 + rank)
-            print(f"  {rank:<5} {id_:<40} {rrf:>10.6f}")
+        if logger.isEnabledFor(logging.DEBUG):
+            for id_, rank in sorted(dense_rank.items(), key=lambda x: x[1]):
+                rrf = 1 / (60 + rank)
+                logger.debug("  Dense [%d] %s rrf=%.6f", rank, id_, rrf)
 
         # RRF merge
         dense_ids_ranked = [id_ for id_, _ in sorted(dense_rank.items(), key=lambda x: x[1])]
@@ -205,13 +197,10 @@ class ChromaVectorStore(BaseVectorStore):
 
         top_ids = sorted(rrf_scores, key=lambda id_: rrf_scores[id_], reverse=True)[:params.top_k]
 
-        print(f"\n  RRF Merged (top {params.top_k}):")
-        print(f"  {'Chunk ID':<40} {'RRF Score':>10} {'Status':>10}")
-        print(f"  {'-'*40} {'-'*10} {'-'*10}")
-        for id_ in top_ids:
-            status = "kept" if (params.rrf_score_threshold is None or rrf_scores[id_] >= params.rrf_score_threshold) else "filtered"
-            print(f"  {id_:<40} {rrf_scores[id_]:>10.6f} {status:>10}")
-        print()
+        if logger.isEnabledFor(logging.DEBUG):
+            for id_ in top_ids:
+                status = "kept" if (params.rrf_score_threshold is None or rrf_scores[id_] >= params.rrf_score_threshold) else "filtered"
+                logger.debug("  RRF %s score=%.6f %s", id_, rrf_scores[id_], status)
 
         docs = []
         for id_ in top_ids:

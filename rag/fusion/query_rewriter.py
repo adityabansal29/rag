@@ -1,6 +1,10 @@
+import logging
+
 from pydantic import BaseModel
 
 from rag.llm.base import BaseLLMClient
+
+logger = logging.getLogger(__name__)
 
 
 class _RewriteOnly(BaseModel):
@@ -31,10 +35,10 @@ class QueryRewriter:
             )
             variants = result.queries
             if not variants:
-                print(f"  [rewriter] warning: LLM returned 0 variants, fusion will run on original query only")
+                logger.warning("[rewriter] LLM returned 0 variants, fusion will run on original query only")
             elif len(variants) != n:
-                print(f"  [rewriter] warning: expected {n} variants, got {len(variants)}")
+                logger.warning("[rewriter] expected %d variants, got %d", n, len(variants))
             return query, variants
         except Exception as e:
-            print(f"  [rewriter] warning: LLM call failed ({e}), skipping rewrite")
+            logger.warning("[rewriter] LLM call failed (%s), skipping rewrite", e)
             return query, []

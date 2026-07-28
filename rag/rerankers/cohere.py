@@ -1,6 +1,10 @@
+import logging
+
 from langchain_core.documents import Document
 
 from rag.rerankers.base import BaseReranker
+
+logger = logging.getLogger(__name__)
 
 
 class CohereReranker(BaseReranker):
@@ -34,19 +38,15 @@ class CohereReranker(BaseReranker):
             top_n=top_k,
         )
 
-        print(f"\n  [rerank] cohere '{self.model}' scored {len(documents)} candidates → top {top_k}")
-        print(f"  {'#':<5} {'Score':>10} {'Chunk ID':<40}")
-        print(f"  {'-'*5} {'-'*10} {'-'*40}")
-
+        logger.info("[rerank] cohere '%s' scored %d candidates → top %d", self.model, len(documents), top_k)
         reranked = []
         for i, result in enumerate(response.results):
             doc = documents[result.index]
             score = result.relevance_score
-            print(f"  {i:<5} {score:>10.4f} {doc.metadata.get('chunk_id', ''):<40}")
+            logger.debug("[rerank] %d  score=%.4f  chunk=%s", i, score, doc.metadata.get('chunk_id', ''))
             reranked.append(Document(
                 page_content=doc.page_content,
                 metadata={**doc.metadata, "rerank_score": round(score, 6)},
             ))
-        print()
 
         return reranked

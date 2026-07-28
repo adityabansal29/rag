@@ -1,6 +1,9 @@
 import asyncio
+import logging
 
 from rag.models import Chunk, ChunkType
+
+logger = logging.getLogger(__name__)
 from rag.llm.base import BaseLLMClient, build_llm_client
 
 
@@ -78,12 +81,13 @@ class LLMEnricher:
 
         non_text = [c for c in all_children if c.chunk_type != ChunkType.TEXT]
         text_count = len(all_children) - len(non_text)
-        print(f"  [enricher] {len(all_children)} children total: {text_count} text (passthrough), {len(non_text)} non-text (LLM) across {len(parent_chunks)} parents")
+        logger.info("[enricher] %d children: %d text (passthrough), %d non-text (LLM) across %d parents",
+                    len(all_children), text_count, len(non_text), len(parent_chunks))
 
         await asyncio.gather(*[self._enrich_child(child) for child in all_children])
         await asyncio.gather(*[self._summarize_parent(parent) for parent in parent_chunks])
 
-        print(f"  [enricher] all {len(parent_chunks)} parents summarized")
+        logger.info("[enricher] all %d parents summarized", len(parent_chunks))
 
     async def _enrich_child(self, chunk: Chunk) -> None:
         if chunk.chunk_type == ChunkType.TEXT:
@@ -103,7 +107,8 @@ class LLMEnricher:
                     system_prompt=system_prompt,
                     content=str(chunk.raw_content or ""),
                 )
-            print(f"  [enriched] type={chunk.chunk_type.value}  page={chunk.metadata.get('page', '?')}  id={chunk.id}  → {chunk.retrieved_content[:50]!r}")
+            logger.debug("[enriched] type=%s page=%s id=%s → %r",
+                         chunk.chunk_type.value, chunk.metadata.get('page', '?'), chunk.id, chunk.retrieved_content[:50])
 
     async def _summarize_parent(self, parent: Chunk) -> None:
         if not parent.children:
@@ -125,7 +130,8 @@ class LLMEnricher:
                 system_prompt=PARENT_SUMMARY_PROMPT,
                 content=combined,
             )
-            print(f"  [parent enriched] id={parent.id}  section={parent.metadata.get('section_title', '')[:30]!r}  → {parent.retrieved_content[:50]!r}")
+            logger.debug("[parent enriched] id=%s section=%r → %r",
+                         parent.id, parent.metadata.get('section_title', '')[:30], parent.retrieved_content[:50])
 
 
 def build_embedding_content(parent_chunks: list[Chunk]) -> None:

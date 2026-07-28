@@ -1,6 +1,10 @@
+import logging
+
 from langchain_core.documents import Document
 
 from rag.rerankers.base import BaseReranker
+
+logger = logging.getLogger(__name__)
 
 
 class CrossEncoderReranker(BaseReranker):
@@ -33,12 +37,11 @@ class CrossEncoderReranker(BaseReranker):
 
         scored = sorted(zip(scores, documents), key=lambda x: x[0], reverse=True)
 
-        print(f"\n  [rerank] cross-encoder '{self.model_name}' scored {len(documents)} candidates → top {top_k}")
-        print(f"  {'#':<5} {'Score':>10} {'Chunk ID':<40}")
-        print(f"  {'-'*5} {'-'*10} {'-'*40}")
-        for i, (score, doc) in enumerate(scored[:top_k]):
-            print(f"  {i:<5} {float(score):>10.4f} {doc.metadata.get('chunk_id', ''):<40}")
-        print()
+        logger.info("[rerank] cross-encoder '%s' scored %d candidates → top %d", self.model_name, len(documents), top_k)
+        if logger.isEnabledFor(logging.DEBUG):
+            rows = "\n".join(f"  {i:<5} {float(s):>10.4f} {d.metadata.get('chunk_id', ''):<40}"
+                             for i, (s, d) in enumerate(scored[:top_k]))
+            logger.debug("[rerank] scores:\n%s", rows)
 
         return [
             Document(

@@ -1,7 +1,10 @@
 import asyncio
+import logging
 from dataclasses import replace
 
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
 
 from rag.hybrid.pipeline import HybridRAGPipeline
 from rag.vectorstores.base import SearchParams
@@ -56,15 +59,12 @@ class FusionRAGPipeline:
         standalone, variants = await self.rewriter.rewrite(query, self.n_queries)
         fusion_degraded = not variants  # rewriter returned no variants (LLM failure or empty response)
         if standalone != query:
-            print(f"\n  [contextualize] '{query[:60]}' → '{standalone[:60]}'")
+            logger.debug("[contextualize] '%s' → '%s'", query[:60], standalone[:60])
         all_queries = [standalone] + variants
         if fusion_degraded:
-            print(f"  [fusion] warning: no variants returned — running as single-query dense search")
+            logger.warning("[fusion] no variants returned — running as single-query dense search")
 
-        print(f"\n  [fusion] rewritten queries ({len(all_queries)} total):")
-        for i, q in enumerate(all_queries):
-            label = "original" if i == 0 else f"variant {i}"
-            print(f"    [{label}] {q}")
+        logger.debug("[fusion] rewritten queries (%d total): %s", len(all_queries), all_queries)
 
         dense_params, bm25_params = _fusion_search_params(params, len(all_queries), params.use_hybrid)
 
@@ -94,7 +94,7 @@ class FusionRAGPipeline:
                 doc_lookup[chunk_id] = doc
                 ids.append(chunk_id)
             rank_lists.append(ids)
-            print(f"  [fusion] '{label}' → {len(docs)} chunks")
+            logger.debug("[fusion] '%s' → %d chunks", label, len(docs))
 
         # RRF across all query result lists
         rrf_scores = rrf_fuse(rank_lists)
@@ -102,12 +102,10 @@ class FusionRAGPipeline:
         candidate_count = min(len(rrf_scores), params.top_k * 5) if self.pipeline.reranker is not None else params.top_k
         top_ids = sorted(rrf_scores, key=lambda id_: rrf_scores[id_], reverse=True)[:candidate_count]
 
-        print(f"\n  [fusion] RRF merged → top {candidate_count} of {len(rrf_scores)} unique chunks")
-        print(f"  {'Chunk ID':<40} {'RRF Score':>10}")
-        print(f"  {'-'*40} {'-'*10}")
-        for id_ in top_ids:
-            print(f"  {id_:<40} {rrf_scores[id_]:>10.6f}")
-        print()
+        logger.info("[fusion] RRF merged → top %d of %d unique chunks", candidate_count, len(rrf_scores))
+        if logger.isEnabledFor(logging.DEBUG):
+            rows = "\n".join(f"  {id_:<40} {rrf_scores[id_]:>10.6f}" for id_ in top_ids)
+            logger.debug("[fusion] RRF scores:\n%s", rows)
 
         extra = {"fusion_degraded": True} if fusion_degraded else {}
         final_docs = [
