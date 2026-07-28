@@ -15,7 +15,7 @@ load_dotenv(override=True)
 pipeline = HybridRAGPipeline(vectorstore=build_vectorstore())
 
 
-def _process(msg: dict) -> None:
+async def _process(msg: dict) -> None:
     body     = json.loads(msg["Body"])
     key      = body["s3_key"]
     job_id   = body.get("job_id", key)
@@ -26,11 +26,11 @@ def _process(msg: dict) -> None:
 
     suffix = "_" + filename
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        s3.download_fileobj(BUCKET, key, tmp)
+        await asyncio.to_thread(s3.download_fileobj, BUCKET, key, tmp)
         tmp_path = tmp.name
 
     try:
-        asyncio.run(pipeline.run_async(tmp_path, on_step=tracker.on_step))
+        await pipeline.run_async(tmp_path, on_step=tracker.on_step)
         tracker.finish()
         print(f"[worker] indexed: {key}")
     except Exception as e:
@@ -40,7 +40,7 @@ def _process(msg: dict) -> None:
         os.unlink(tmp_path)
 
 
-def listen() -> None:
+async def listen() -> None:
     shutdown = False
 
     def _handle_signal(signum, frame):
@@ -53,24 +53,25 @@ def listen() -> None:
 
     print(f"[worker] polling {QUEUE_URL}")
     while not shutdown:
-        resp = sqs.receive_message(
+        resp = await asyncio.to_thread(
+            sqs.receive_message,
             QueueUrl=QUEUE_URL,
             MaxNumberOfMessages=1,
             WaitTimeSeconds=20,
         )
         for msg in resp.get("Messages", []):
             try:
-                _process(msg)
+                await _process(msg)
             except Exception as e:
                 print(f"[worker] error processing {msg['MessageId']}: {e}")
             finally:
                 # Always delete — on failure, SQS would re-deliver indefinitely otherwise.
-                # Permanent failures should be caught by a DLQ, not re-delivery loops.
-                sqs.delete_message(
+                await asyncio.to_thread(
+                    sqs.delete_message,
                     QueueUrl=QUEUE_URL,
                     ReceiptHandle=msg["ReceiptHandle"],
                 )
 
 
 if __name__ == "__main__":
-    listen()
+    asyncio.run(listen())
