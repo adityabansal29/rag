@@ -1,4 +1,5 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -49,7 +50,7 @@ _SYSTEM_PROMPT = (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    llm = ChatOpenAI(model=os.getenv("LLM_MODEL", "gpt-4o"), temperature=0)
     if state.CHECKPOINTER_BACKEND == "dynamodb":
         saver = _make_dynamo_checkpointer()
         state.agent = create_agent(llm, tools=[rag_search], checkpointer=saver, system_prompt=_SYSTEM_PROMPT)

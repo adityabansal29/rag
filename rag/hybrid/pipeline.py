@@ -1,4 +1,5 @@
 import asyncio
+import os
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
@@ -55,16 +56,17 @@ class HybridRAGPipeline:
         self,
         embedder: BaseEmbedder | None = None,
         vectorstore: BaseVectorStore | None = None,
-        llm_model: str = "gpt-4o",
+        llm_model: str | None = None,
         llm_concurrency: int = 10,
         reranker: BaseReranker | None = None,
     ):
+        resolved_model      = llm_model or os.getenv("LLM_MODEL", "gpt-4o")
         self.embedder       = embedder    or OpenAIEmbedder()
         self.vectorstore    = vectorstore or ChromaVectorStore()
-        self.llm_model      = llm_model
+        self.llm_model      = resolved_model
         self.reranker       = reranker
         self.enricher       = LLMEnricher(
-            model=llm_model,
+            model=resolved_model,
             max_concurrency=llm_concurrency,
         )
     def _get_parser(self, parser: str) -> BaseParser:
