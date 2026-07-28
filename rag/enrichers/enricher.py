@@ -67,7 +67,7 @@ class LLMEnricher:
 
     @property
     def semaphore(self) -> asyncio.Semaphore:
-        if self._semaphore is None or self._semaphore._loop != asyncio.get_event_loop():
+        if self._semaphore is None:
             self._semaphore = asyncio.Semaphore(self._max_concurrency)
         return self._semaphore
 
