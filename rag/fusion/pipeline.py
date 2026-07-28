@@ -121,15 +121,5 @@ class FusionRAGPipeline:
 
         return standalone, final_docs
 
-    def search(
-        self,
-        query: str,
-        params: SearchParams | None = None,
-    ) -> tuple[str, list[Document]]:
-        return asyncio.run(self.search_async(query, params))
-
     async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
         return await self.pipeline.generate_answer_async(query, chunks)
-
-    def generate_answer(self, query: str, chunks: list[Document]) -> str:
-        return self.pipeline.generate_answer(query, chunks)

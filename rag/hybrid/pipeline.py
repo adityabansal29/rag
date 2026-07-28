@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import os
 from collections import Counter
 from dataclasses import replace
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Callable
 
@@ -88,66 +91,49 @@ class HybridRAGPipeline:
             if on_step:
                 on_step(name, "done", metadata)
 
-        print(f"\n{'='*60}")
-        print(f"[1/6] Parsing {Path(file_path).name} with {parser}...")
-        print(f"{'='*60}\n")
+        logger.info("[1/6] Parsing %s with %s", Path(file_path).name, parser)
         raw_parents = self._get_parser(parser).parse(file_path)
-        print(f"\n      → {len(raw_parents)} sections found")
-        BaseParser.print_chunks(raw_parents)
+        logger.info("      → %d sections found", len(raw_parents))
         type_counts: dict[str, int] = Counter(
             child.chunk_type.value
             for p in raw_parents for child in p.children
         )
         _step("parsing", {"sections_found": len(raw_parents), "element_types": type_counts})
 
-        print(f"\n{'='*60}")
-        print(f"[2/6] Merging/splitting text chunks...")
-        print(f"{'='*60}\n")
+        logger.info("[2/6] Merging/splitting text chunks")
         chunks_before = sum(len(p.children) for p in raw_parents)
         parent_chunks = process_all_parents(raw_parents)
         chunks_after  = sum(len(p.children) for p in parent_chunks)
-        print(f"\n      → {chunks_after} child chunks after merge/split")
+        logger.info("      → %d child chunks after merge/split", chunks_after)
         _step("chunking", {"chunks_before": chunks_before, "chunks_after": chunks_after})
 
-        print(f"\n{'='*60}")
-        print(f"[3/6] Enriching non-text chunks with LLM...")
-        print(f"{'='*60}\n")
+        logger.info("[3/6] Enriching non-text chunks with LLM")
         await self.enricher.enrich_all(parent_chunks)
-        print("\n      → enrichment complete")
         non_text  = sum(1 for p in parent_chunks for c in p.children if c.chunk_type.value != "text")
         summaries = sum(1 for p in parent_chunks if p.retrieved_content)
+        logger.info("      → enrichment complete")
         _step("enriching", {
             "total_children": chunks_after,
             "non_text_enriched": non_text,
             "parent_summaries": summaries,
         })
 
-        print(f"\n{'='*60}")
-        print(f"[4/6] Building embedding content...")
-        print(f"{'='*60}\n")
+        logger.info("[4/6] Building embedding content")
         build_embedding_content(parent_chunks)
-        print("      → embedding content built")
 
-        print(f"\n{'='*60}")
-        print(f"[5/6] Creating LangChain documents...")
-        print(f"{'='*60}\n")
+        logger.info("[5/6] Creating LangChain documents")
         docs = chunks_to_langchain_docs(parent_chunks)
-        print(f"      → {len(docs)} documents created")
+        logger.info("      → %d documents created", len(docs))
         _step("embedding", {"documents_created": len(docs)})
 
-        print(f"\n{'='*60}")
-        print(f"[6/6] Embedding and storing...")
-        print(f"{'='*60}\n")
+        logger.info("[6/6] Embedding and storing")
         texts   = [doc.page_content for doc in docs]
         vectors = self.embedder.embed_documents(texts)
         self.vectorstore.upsert(docs, vectors)
-        print(f"      → {len(docs)} documents stored\n")
+        logger.info("      → %d documents stored", len(docs))
         _step("storing", {"documents_stored": len(docs)})
 
         return parent_chunks
-
-    def run(self, file_path: str, parser: str = "unstructured") -> list[Chunk]:
-        return asyncio.run(self.run_async(file_path, parser))
 
     async def search_async(
         self,
@@ -156,7 +142,7 @@ class HybridRAGPipeline:
     ) -> tuple[str, list[Document]]:
         params = params or SearchParams()
         mode = "hybrid" if params.use_hybrid else "dense"
-        print(f"\n  [search] query='{query[:80]}'  mode={mode}  top_k={params.top_k}")
+        logger.debug("[search] query='%s' mode=%s top_k=%d", query[:80], mode, params.top_k)
         query_vector = self.embedder.embed_query(query)
 
         # fetch a larger pool when re-ranking so the reranker can make a real selection
@@ -166,19 +152,12 @@ class HybridRAGPipeline:
             query_text=query,
             params=retrieve_params,
         )
-        print(f"  [search] → {len(results)} chunks returned")
+        logger.debug("[search] → %d chunks returned", len(results))
 
         if self.reranker is not None and results:
             results = self.reranker.rerank(query, results, top_k=params.top_k)
 
         return query, results
-
-    def search(
-        self,
-        query: str,
-        params: SearchParams | None = None,
-    ) -> tuple[str, list[Document]]:
-        return asyncio.run(self.search_async(query, params))
 
     async def bm25_search_async(
         self,
@@ -186,9 +165,9 @@ class HybridRAGPipeline:
         params: SearchParams | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
-        print(f"\n  [bm25] query='{query[:80]}'  top_k={params.top_k}")
+        logger.debug("[bm25] query='%s' top_k=%d", query[:80], params.top_k)
         results = self.vectorstore.bm25_search(query, params)
-        print(f"  [bm25] → {len(results)} chunks returned")
+        logger.debug("[bm25] → %d chunks returned", len(results))
         return results
 
     async def dense_search_async(
@@ -197,18 +176,18 @@ class HybridRAGPipeline:
         params: SearchParams | None = None,
     ) -> list[Document]:
         params = params or SearchParams()
-        print(f"\n  [dense] query='{query[:80]}'  top_k={params.top_k}")
+        logger.debug("[dense] query='%s' top_k=%d", query[:80], params.top_k)
         query_vector = self.embedder.embed_query(query)
         results = self.vectorstore.search(
             query_vector=query_vector,
             query_text=query,
             params=params,
         )
-        print(f"  [dense] → {len(results)} chunks returned")
+        logger.debug("[dense] → %d chunks returned", len(results))
         return results
 
     async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
-        print(f"\n  [generate] query='{query[:80]}'  context_chunks={len(chunks)}")
+        logger.debug("[generate] query='%s' context_chunks=%d", query[:80], len(chunks))
         parts = []
         for i, doc in enumerate(chunks):
             block = f"[{i+1}] {doc.page_content}"
@@ -224,8 +203,6 @@ class HybridRAGPipeline:
             ),
             content=f"Context:\n{context}\n\nQuestion: {query}",
         )
-        print(f"  [generate] → {answer[:120]!r}")
+        logger.debug("[generate] → %r", answer[:120])
         return answer
 
-    def generate_answer(self, query: str, chunks: list[Document]) -> str:
-        return asyncio.run(self.generate_answer_async(query, chunks))
