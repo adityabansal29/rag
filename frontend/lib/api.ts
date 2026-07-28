@@ -76,6 +76,7 @@ export async function sendChat(message: string, threadId: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message, thread_id: threadId }),
   });
+  if (res.status === 409) throw Object.assign(new Error("Session corrupted"), { code: "SESSION_CORRUPTED" });
   if (!res.ok) throw new Error("Chat request failed");
   return res.json() as Promise<{ answer: string; sources: Source[] }>;
 }

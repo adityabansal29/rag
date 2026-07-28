@@ -109,6 +109,7 @@ python backend/scripts/setup_dynamo.py   # creates rag-jobs, rag-chat-checkpoint
 
 ## Run
 
+**Local (3 terminals):**
 ```bash
 bash run.sh api       # FastAPI on :8000
 bash run.sh worker    # SQS polling loop
@@ -116,6 +117,13 @@ bash run.sh ui        # Next.js on :3000
 
 bash run.sh upload ./paper.pdf   # upload a document from the CLI
 ```
+
+**Docker:**
+```bash
+docker compose up --build    # api + worker + ui
+```
+
+`NEXT_PUBLIC_API_URL` is baked into the frontend bundle at build time — set it in `.env` before building if your API is not on `http://localhost:8000`.
 
 ---
 
@@ -130,3 +138,28 @@ See [`rag/fusion/README.md`](rag/fusion/README.md) for query rewriting, multi-qu
 ## Conversational Agent
 
 A LangGraph ReAct agent exposes `rag_search` (a LangChain `@tool` wrapping `FusionRAGPipeline`) and loops until it has enough context to answer. Conversation history is maintained by a LangGraph checkpointer — DynamoDB in production, SQLite in dev — keyed by `thread_id`. The browser stores `thread_id` in `sessionStorage`: stateless client, stateful server.
+
+---
+
+## Screenshots
+
+**Pipeline — job started (0%)**  
+![Pipeline job started](docs/screenshots/pipeline_job_start.png)
+
+**Pipeline — parsing complete, chunking in progress (20%)**  
+![Pipeline in progress](docs/screenshots/pipeline_job_inprogress.png)
+
+**Pipeline — all 5 steps complete (100%)**  
+![Pipeline complete](docs/screenshots/pipeline_job_complete.png)
+
+**Chat — empty state**  
+![Chat empty state](docs/screenshots/chat-empty.png)
+
+**Chat — answer with RRF-scored sources**  
+![Chat answer with sources](docs/screenshots/chat-q1-answer.png)
+
+**Chat — source chunk expanded**  
+![Source chunk expanded](docs/screenshots/chat-q1-sources.png)
+
+**Chat — multi-turn follow-up (agent resolves context from history)**  
+![Multi-turn follow-up](docs/screenshots/chat-q2-multiturn.png)

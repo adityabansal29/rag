@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from langchain_core.messages import HumanMessage
@@ -32,7 +32,7 @@ def _parse_job(item: dict) -> dict:
 
 @router.get("/presigned-url")
 def get_presigned_url(filename: str):
-    key = f"uploads/{uuid.uuid4()}/{filename}"
+    key = f"uploads/{date.today().strftime('%Y-%m-%d')}/{uuid.uuid4()}/{filename}"
     url = state.s3.generate_presigned_url(
         "put_object",
         Params={"Bucket": state.BUCKET, "Key": key},
@@ -106,10 +106,17 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=503, detail="Agent not ready")
 
     config = {"configurable": {"thread_id": req.thread_id}}
-    result = await state.agent.ainvoke(
-        {"messages": [HumanMessage(content=req.message)]},
-        config=config,
-    )
+    try:
+        result = await state.agent.ainvoke(
+            {"messages": [HumanMessage(content=req.message)]},
+            config=config,
+        )
+    except Exception as exc:
+        msg = str(exc)
+        # Corrupted checkpoint: dangling tool call — tell client to start a new session
+        if "tool_call" in msg.lower() or "tool messages" in msg.lower():
+            raise HTTPException(status_code=409, detail="Session state corrupted, please start a new chat") from exc
+        raise HTTPException(status_code=500, detail=msg) from exc
 
     answer = result["messages"][-1].content
 

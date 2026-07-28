@@ -17,6 +17,9 @@ chroma_db/
 # SQLite checkpointer
 *.db
 
+# Docker bind-mount data directory
+data/
+
 # Node / Next.js
 node_modules/
 .next/

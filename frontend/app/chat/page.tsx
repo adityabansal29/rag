@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, ChevronDown, ChevronUp, Plus, BookOpen } from "lucide-react";
+import { Send, ChevronDown, ChevronUp, Plus, BookOpen, MessageSquare } from "lucide-react";
 import { sendChat, type Source } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +9,27 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+}
+
+interface Session {
+  id: string;
+  title: string;
+  createdAt: number;
+  messages: Message[];
+}
+
+const SESSIONS_KEY = "rag_sessions";
+
+function loadSessions(): Session[] {
+  try {
+    return JSON.parse(localStorage.getItem(SESSIONS_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveSessions(sessions: Session[]) {
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
 }
 
 function TypingDots() {
@@ -90,50 +111,102 @@ function AssistantMessage({ msg }: { msg: Message }) {
 }
 
 export default function ChatPage() {
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeId, setActiveId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [threadId, setThreadId] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Bootstrap: load sessions from localStorage, create initial session
   useEffect(() => {
-    let tid = sessionStorage.getItem("rag_thread_id");
-    if (!tid) {
-      tid = crypto.randomUUID();
-      sessionStorage.setItem("rag_thread_id", tid);
+    const stored = loadSessions();
+    if (stored.length === 0) {
+      const id = crypto.randomUUID();
+      const fresh: Session = { id, title: "New chat", createdAt: Date.now(), messages: [] };
+      saveSessions([fresh]);
+      setSessions([fresh]);
+      setActiveId(id);
+    } else {
+      setSessions(stored);
+      setActiveId(stored[0].id);
+      setMessages(stored[0].messages);
     }
-    setThreadId(tid);
   }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  const persistMessages = (id: string, msgs: Message[]) => {
+    setSessions((prev) => {
+      const updated = prev.map((s) =>
+        s.id === id
+          ? { ...s, messages: msgs, title: msgs.find((m) => m.role === "user")?.content.slice(0, 40) ?? s.title }
+          : s
+      );
+      saveSessions(updated);
+      return updated;
+    });
+  };
+
   const send = async () => {
     const text = input.trim();
     if (!text || loading) return;
     setInput("");
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-    setMessages((m) => [...m, { role: "user", content: text }]);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+
+    const withUser: Message[] = [...messages, { role: "user", content: text }];
+    setMessages(withUser);
     setLoading(true);
     try {
-      const { answer, sources } = await sendChat(text, threadId);
-      setMessages((m) => [...m, { role: "assistant", content: answer, sources }]);
-    } catch {
-      setMessages((m) => [...m, { role: "assistant", content: "Something went wrong. Please try again." }]);
+      const { answer, sources } = await sendChat(text, activeId);
+      const withReply: Message[] = [...withUser, { role: "assistant", content: answer, sources }];
+      setMessages(withReply);
+      persistMessages(activeId, withReply);
+    } catch (err: unknown) {
+      if (err instanceof Error && (err as { code?: string }).code === "SESSION_CORRUPTED") {
+        // Auto-create a new session and retry
+        const newId = crypto.randomUUID();
+        const fresh: Session = { id: newId, title: text.slice(0, 40), createdAt: Date.now(), messages: withUser };
+        setSessions((prev) => { const u = [fresh, ...prev]; saveSessions(u); return u; });
+        setActiveId(newId);
+        try {
+          const { answer, sources } = await sendChat(text, newId);
+          const withReply: Message[] = [...withUser, { role: "assistant", content: answer, sources }];
+          setMessages(withReply);
+          persistMessages(newId, withReply);
+        } catch {
+          const withErr: Message[] = [...withUser, { role: "assistant", content: "Something went wrong. Please try again." }];
+          setMessages(withErr);
+          persistMessages(newId, withErr);
+        }
+      } else {
+        const withErr: Message[] = [...withUser, { role: "assistant", content: "Something went wrong. Please try again." }];
+        setMessages(withErr);
+        persistMessages(activeId, withErr);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const newChat = () => {
-    const tid = crypto.randomUUID();
-    sessionStorage.setItem("rag_thread_id", tid);
-    setThreadId(tid);
+    const id = crypto.randomUUID();
+    const fresh: Session = { id, title: "New chat", createdAt: Date.now(), messages: [] };
+    setSessions((prev) => {
+      const updated = [fresh, ...prev];
+      saveSessions(updated);
+      return updated;
+    });
+    setActiveId(id);
     setMessages([]);
+  };
+
+  const switchSession = (s: Session) => {
+    setActiveId(s.id);
+    setMessages(s.messages);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -141,109 +214,133 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* Header */}
-      <div className="shrink-0 border-b border-border px-6 py-4 flex items-center justify-between">
-        <div>
+    <div className="flex h-screen">
+      {/* Session sidebar */}
+      <div className="w-56 shrink-0 border-r border-border flex flex-col bg-muted/20">
+        <div className="px-3 py-3 border-b border-border">
+          <button
+            onClick={newChat}
+            className="w-full flex items-center gap-2 text-sm font-medium px-3 py-2 rounded-lg bg-muted hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Plus size={14} />
+            New chat
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto py-2 space-y-0.5 px-2">
+          {sessions.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => switchSession(s)}
+              className={cn(
+                "w-full text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-start gap-2",
+                s.id === activeId
+                  ? "bg-muted text-foreground font-medium"
+                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              )}
+            >
+              <MessageSquare size={12} className="shrink-0 mt-0.5 opacity-60" />
+              <span className="truncate">{s.title}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main chat area */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Header */}
+        <div className="shrink-0 border-b border-border px-6 py-4">
           <h1 className="text-xl font-bold tracking-tight">Chat</h1>
-          {threadId && (
+          {activeId && (
             <p className="text-xs text-muted-foreground font-mono mt-0.5">
-              session · {threadId.slice(0, 8)}
+              session · {activeId.slice(0, 8)}
             </p>
           )}
         </div>
-        <button
-          onClick={newChat}
-          className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg bg-muted hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Plus size={14} />
-          New chat
-        </button>
-      </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-8 space-y-6">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-            <div className="w-16 h-16 rounded-2xl gradient-brand flex items-center justify-center shadow-lg">
-              <Send size={22} className="text-white" />
-            </div>
-            <div>
-              <p className="font-semibold text-lg">Ask anything</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Questions are answered from your indexed documents.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-2 mt-2 w-full max-w-sm">
-              {[
-                "Summarize the key findings",
-                "What are the main topics covered?",
-                "List the most important conclusions",
-              ].map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => { setInput(prompt); textareaRef.current?.focus(); }}
-                  className="text-left px-4 py-2.5 rounded-xl border border-border bg-card hover:bg-muted/40 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {messages.map((msg, i) => (
-          <div key={i} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-            {msg.role === "user" ? (
-              <div className="rounded-2xl rounded-tr-sm px-4 py-3.5 text-sm max-w-[75%] leading-relaxed whitespace-pre-wrap gradient-brand text-white font-medium shadow-sm">
-                {msg.content}
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-6 py-8 space-y-6">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
+              <div className="w-16 h-16 rounded-2xl gradient-brand flex items-center justify-center shadow-lg">
+                <Send size={22} className="text-white" />
               </div>
-            ) : (
-              <AssistantMessage msg={msg} />
-            )}
-          </div>
-        ))}
-
-        {loading && (
-          <div className="flex justify-start">
-            <div className="rounded-2xl rounded-tl-sm bg-card border border-border">
-              <TypingDots />
+              <div>
+                <p className="font-semibold text-lg">Ask anything</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Questions are answered from your indexed documents.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-2 mt-2 w-full max-w-sm">
+                {[
+                  "Summarize the key findings",
+                  "What are the main topics covered?",
+                  "List the most important conclusions",
+                ].map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => { setInput(prompt); textareaRef.current?.focus(); }}
+                    className="text-left px-4 py-2.5 rounded-xl border border-border bg-card hover:bg-muted/40 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
+          )}
 
-      {/* Input */}
-      <div className="shrink-0 border-t border-border px-6 py-4 bg-background/80 backdrop-blur-sm">
-        <div className="flex gap-3 items-end max-w-3xl mx-auto">
-          <div className="flex-1 rounded-2xl border border-border bg-card focus-within:border-cyan-700/60 focus-within:ring-2 focus-within:ring-cyan-700/20 transition-all">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Ask a question about your documents…"
-              rows={1}
-              className="w-full resize-none bg-transparent px-4 py-3 text-sm focus:outline-none placeholder:text-muted-foreground leading-relaxed"
-              style={{ minHeight: "48px", maxHeight: "160px" }}
-              onInput={(e) => {
-                const t = e.currentTarget;
-                t.style.height = "auto";
-                t.style.height = Math.min(t.scrollHeight, 160) + "px";
-              }}
-            />
-          </div>
-          <button
-            aria-label="Send message"
-            onClick={send}
-            disabled={!input.trim() || loading}
-            className="shrink-0 h-12 w-12 rounded-2xl gradient-primary-btn text-white flex items-center justify-center shadow-sm"
-          >
-            <Send size={16} />
-          </button>
+          {messages.map((msg, i) => (
+            <div key={i} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
+              {msg.role === "user" ? (
+                <div className="rounded-2xl rounded-tr-sm px-4 py-3.5 text-sm max-w-[75%] leading-relaxed whitespace-pre-wrap gradient-brand text-white font-medium shadow-sm">
+                  {msg.content}
+                </div>
+              ) : (
+                <AssistantMessage msg={msg} />
+              )}
+            </div>
+          ))}
+
+          {loading && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl rounded-tl-sm bg-card border border-border">
+                <TypingDots />
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
         </div>
-        <p className="text-center text-[11px] text-muted-foreground/60 mt-2">Enter to send · Shift+Enter for newline</p>
+
+        {/* Input */}
+        <div className="shrink-0 border-t border-border px-6 py-4 bg-background/80 backdrop-blur-sm">
+          <div className="flex gap-3 items-end max-w-3xl mx-auto">
+            <div className="flex-1 rounded-2xl border border-border bg-card focus-within:border-cyan-700/60 focus-within:ring-2 focus-within:ring-cyan-700/20 transition-all">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder="Ask a question about your documents…"
+                rows={1}
+                className="w-full resize-none bg-transparent px-4 py-3 text-sm focus:outline-none placeholder:text-muted-foreground leading-relaxed"
+                style={{ minHeight: "48px", maxHeight: "160px" }}
+                onInput={(e) => {
+                  const t = e.currentTarget;
+                  t.style.height = "auto";
+                  t.style.height = Math.min(t.scrollHeight, 160) + "px";
+                }}
+              />
+            </div>
+            <button
+              aria-label="Send message"
+              onClick={send}
+              disabled={!input.trim() || loading}
+              className="shrink-0 h-12 w-12 rounded-2xl gradient-primary-btn text-white flex items-center justify-center shadow-sm"
+            >
+              <Send size={16} />
+            </button>
+          </div>
+          <p className="text-center text-[11px] text-muted-foreground/60 mt-2">Enter to send · Shift+Enter for newline</p>
+        </div>
       </div>
     </div>
   );
