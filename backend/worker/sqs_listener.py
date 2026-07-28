@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import signal
 import tempfile
 
 import boto3
@@ -60,8 +61,18 @@ def _process(msg: dict) -> None:
 
 
 def listen() -> None:
+    shutdown = False
+
+    def _handle_signal(signum, frame):
+        nonlocal shutdown
+        print(f"[worker] signal {signum} received — draining current message then exiting")
+        shutdown = True
+
+    signal.signal(signal.SIGINT,  _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
     print(f"[worker] polling {QUEUE_URL}")
-    while True:
+    while not shutdown:
         resp = sqs.receive_message(
             QueueUrl=QUEUE_URL,
             MaxNumberOfMessages=1,
@@ -70,12 +81,15 @@ def listen() -> None:
         for msg in resp.get("Messages", []):
             try:
                 _process(msg)
+            except Exception as e:
+                print(f"[worker] error processing {msg['MessageId']}: {e}")
+            finally:
+                # Always delete — on failure, SQS would re-deliver indefinitely otherwise.
+                # Permanent failures should be caught by a DLQ, not re-delivery loops.
                 sqs.delete_message(
                     QueueUrl=QUEUE_URL,
                     ReceiptHandle=msg["ReceiptHandle"],
                 )
-            except Exception as e:
-                print(f"[worker] error processing {msg['MessageId']}: {e}")
 
 
 if __name__ == "__main__":
