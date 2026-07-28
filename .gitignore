@@ -26,3 +26,7 @@ node_modules/
 
 # Playwright MCP test artifacts
 .playwright-mcp/
+
+# Log files (directory tracked via logs/.gitkeep)
+logs/*.log
+logs/*.log.*

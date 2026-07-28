@@ -77,5 +77,6 @@ async def listen() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+    from backend.logging_config import configure_logging
+    configure_logging()
     asyncio.run(listen())
