@@ -14,7 +14,6 @@ from langgraph_checkpoint_dynamodb.saver import DynamoDBSaver
 
 from backend.api import state
 from backend.api.routes import router
-from backend.api.state import rag_search
 
 
 class AsyncDynamoDBSaver(DynamoDBSaver):
@@ -57,11 +56,11 @@ async def lifespan(app: FastAPI):
     llm = ChatOpenAI(model=os.getenv("LLM_MODEL", "gpt-4o"), temperature=0)
     if state.CHECKPOINTER_BACKEND == "dynamodb":
         saver = _make_dynamo_checkpointer()
-        state.agent = create_agent(llm, tools=[rag_search], checkpointer=saver, system_prompt=_SYSTEM_PROMPT)
+        state.agent = create_agent(llm, tools=[state.rag_search], checkpointer=saver, system_prompt=_SYSTEM_PROMPT)
         yield
     else:
         async with AsyncSqliteSaver.from_conn_string(state.CHECKPOINTER_DB) as saver:
-            state.agent = create_agent(llm, tools=[rag_search], checkpointer=saver, system_prompt=_SYSTEM_PROMPT)
+            state.agent = create_agent(llm, tools=[state.rag_search], checkpointer=saver, system_prompt=_SYSTEM_PROMPT)
             yield
 
 

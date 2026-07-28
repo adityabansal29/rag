@@ -22,12 +22,12 @@ CHAT_CHECKPOINTS_TABLE = os.getenv("CHAT_CHECKPOINTS_TABLE", "rag-chat-checkpoin
 CHAT_WRITES_TABLE      = os.getenv("CHAT_WRITES_TABLE", "rag-chat-writes")
 
 _hybrid  = HybridRAGPipeline(vectorstore=build_vectorstore(), reranker=CrossEncoderReranker())
-searcher = FusionRAGPipeline(_hybrid, n_queries=2)
+_fusion = FusionRAGPipeline(_hybrid, n_queries=2)
 
 @tool
 async def rag_search(query: str) -> str:
     """Search the knowledge base using fusion RAG and return relevant chunks with scores."""
-    _, chunks = await searcher.search_async(query, params=SearchParams(top_k=4, use_hybrid=True))
+    _, chunks = await _fusion.search_async(query, params=SearchParams(top_k=4, use_hybrid=True))
     if not chunks:
         return "No relevant information found."
     results = []

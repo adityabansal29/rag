@@ -68,20 +68,13 @@ class FusionRAGPipeline:
 
         dense_params, bm25_params = _fusion_search_params(params, len(all_queries), params.use_hybrid)
 
+        tasks  = [self.pipeline.dense_search_async(q, dense_params) for q in all_queries]
+        labels = [f"dense:{q[:40]}" for q in all_queries]
         if bm25_params is not None:
-            # BM25 once on standalone + dense on every variant — merged in outer RRF
-            bm25_results, *dense_results = await asyncio.gather(
-                self.pipeline.bm25_search_async(standalone, bm25_params),
-                *[self.pipeline.dense_search_async(q, dense_params) for q in all_queries],
-            )
-            labeled = [("bm25:standalone", bm25_results)] + [
-                (f"dense:{q[:40]}", docs) for q, docs in zip(all_queries, dense_results)
-            ]
-        else:
-            dense_results = await asyncio.gather(*[
-                self.pipeline.dense_search_async(q, dense_params) for q in all_queries
-            ])
-            labeled = [(f"dense:{q[:40]}", docs) for q, docs in zip(all_queries, dense_results)]
+            tasks  = [self.pipeline.bm25_search_async(standalone, bm25_params)] + tasks
+            labels = ["bm25:standalone"] + labels
+
+        labeled = list(zip(labels, await asyncio.gather(*tasks)))
 
         # build doc lookup and ranked id lists
         doc_lookup: dict[str, Document] = {}
@@ -121,5 +114,3 @@ class FusionRAGPipeline:
 
         return standalone, final_docs
 
-    async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
-        return await self.pipeline.generate_answer_async(query, chunks)

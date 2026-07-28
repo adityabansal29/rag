@@ -51,12 +51,11 @@ def test_child_docs_empty_parent_summary_when_none():
 
 
 def test_generate_answer_includes_parent_context():
-    """generate_answer_async must include parent_summary in context if present."""
+    """generate_answer helper must include parent_summary in context if present."""
     import asyncio
-    from unittest.mock import AsyncMock, MagicMock
-    from rag.hybrid.pipeline import HybridRAGPipeline
+    from unittest.mock import MagicMock
+    from rag.hybrid.pipeline import generate_answer
 
-    pipeline = HybridRAGPipeline.__new__(HybridRAGPipeline)
     mock_llm = MagicMock()
     captured_content = []
 
@@ -65,8 +64,6 @@ def test_generate_answer_includes_parent_context():
         return "answer"
 
     mock_llm.call_text = fake_call_text
-    pipeline.enricher = MagicMock()
-    pipeline.enricher.llm = mock_llm
 
     docs = [
         Document(
@@ -75,9 +72,9 @@ def test_generate_answer_includes_parent_context():
         )
     ]
 
-    asyncio.run(pipeline.generate_answer_async("What is topic X?", docs))
+    asyncio.run(generate_answer(mock_llm, "What is topic X?", docs))
 
     assert captured_content, "call_text was never called"
     context_sent = captured_content[0]
     assert "Parent section covers topics X, Y, Z in depth." in context_sent, \
-        "generate_answer_async must include parent_summary in context"
+        "generate_answer must include parent_summary in context"

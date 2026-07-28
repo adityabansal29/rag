@@ -3,10 +3,10 @@ import logging
 import os
 from collections import Counter
 from dataclasses import replace
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 from langchain_core.documents import Document
 
@@ -21,6 +21,24 @@ from rag.embedders.openai_embedder import OpenAIEmbedder
 from rag.vectorstores.base import BaseVectorStore, SearchParams
 from rag.vectorstores.chroma_store import ChromaVectorStore
 from rag.rerankers.base import BaseReranker
+
+
+async def generate_answer(llm, query: str, chunks: list[Document]) -> str:
+    parts = []
+    for i, doc in enumerate(chunks):
+        block = f"[{i+1}] {doc.page_content}"
+        summary = doc.metadata.get("parent_summary", "")
+        if summary:
+            block = f"[{i+1}] [Section context: {summary}]\n{doc.page_content}"
+        parts.append(block)
+    context = "\n\n".join(parts)
+    return await llm.call_text(
+        system_prompt=(
+            "You are a helpful assistant. Answer the question using only the provided context. "
+            "Be concise and accurate. If the context is insufficient, say so."
+        ),
+        content=f"Context:\n{context}\n\nQuestion: {query}",
+    )
 
 
 def chunks_to_langchain_docs(parent_chunks: list[Chunk]) -> list[Document]:
@@ -68,12 +86,12 @@ class HybridRAGPipeline:
         resolved_model      = llm_model or os.getenv("LLM_MODEL", "gpt-4o")
         self.embedder       = embedder    or OpenAIEmbedder()
         self.vectorstore    = vectorstore or ChromaVectorStore()
-        self.llm_model      = resolved_model
         self.reranker       = reranker
         self.enricher       = LLMEnricher(
             model=resolved_model,
             max_concurrency=llm_concurrency,
         )
+
     def _get_parser(self, parser: str) -> BaseParser:
         if parser == "unstructured":
             return UnstructuredParser()
@@ -186,23 +204,4 @@ class HybridRAGPipeline:
         logger.debug("[dense] → %d chunks returned", len(results))
         return results
 
-    async def generate_answer_async(self, query: str, chunks: list[Document]) -> str:
-        logger.debug("[generate] query='%s' context_chunks=%d", query[:80], len(chunks))
-        parts = []
-        for i, doc in enumerate(chunks):
-            block = f"[{i+1}] {doc.page_content}"
-            summary = doc.metadata.get("parent_summary", "")
-            if summary:
-                block = f"[{i+1}] [Section context: {summary}]\n{doc.page_content}"
-            parts.append(block)
-        context = "\n\n".join(parts)
-        answer = await self.enricher.llm.call_text(
-            system_prompt=(
-                "You are a helpful assistant. Answer the question using only the provided context. "
-                "Be concise and accurate. If the context is insufficient, say so."
-            ),
-            content=f"Context:\n{context}\n\nQuestion: {query}",
-        )
-        logger.debug("[generate] → %r", answer[:120])
-        return answer
 

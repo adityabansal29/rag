@@ -40,3 +40,8 @@ rerankers = [
     "sentence-transformers>=3.0.0",
     "cohere>=5.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
