@@ -128,13 +128,18 @@ class ChromaVectorStore(BaseVectorStore):
 
         corpus_size = self.collection.count()
         print(f"\n  BM25 Rankings  corpus={corpus_size}")
-        print(f"  {'#':<5} {'Chunk ID':<40} {'RRF Score':>10}")
-        print(f"  {'-'*5} {'-'*40} {'-'*10}")
+        print(f"  {'#':<5} {'Chunk ID':<40} {'RRF Score':>10} {'Status':>10}")
+        print(f"  {'-'*5} {'-'*40} {'-'*10} {'-'*10}")
+        docs = []
         for rank, doc in enumerate(results):
-            print(f"  {rank:<5} {str(doc.metadata.get('chunk_id','?')):<40} {1/(60+rank):>10.6f}")
+            rrf = 1 / (60 + rank)
+            kept = params.rrf_score_threshold is None or rrf >= params.rrf_score_threshold
+            status = "kept" if kept else "filtered"
+            print(f"  {rank:<5} {str(doc.metadata.get('chunk_id','?')):<40} {rrf:>10.6f} {status:>10}")
+            if kept:
+                docs.append(doc)
         print()
-
-        return results
+        return docs
 
     def _hybrid_search(
         self,
