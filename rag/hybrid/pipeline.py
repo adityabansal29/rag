@@ -53,11 +53,10 @@ def chunks_to_langchain_docs(parent_chunks: list[Chunk]) -> list[Document]:
             docs.append(Document(
                 page_content=child.embedding_content,
                 metadata={
-                    "chunk_id":        child.id,
-                    "parent_id":       child.parent_id,
-                    "chunk_type":      child.chunk_type.value,
-                    "parent_summary":  parent_summary,
-                    **({"raw_content": str(child.raw_content or "")} if child.chunk_type != ChunkType.TEXT else {}),
+                    "chunk_id":   child.id,
+                    "parent_id":  child.parent_id,
+                    "chunk_type": child.chunk_type.value,
+                    "parent_summary": parent_summary[:10000],
                     **{k: v for k, v in child.metadata.items()
                        if isinstance(v, (str, int, float, bool))},
                 },

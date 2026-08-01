@@ -32,12 +32,21 @@ dynamo = boto3.client("dynamodb", region_name=AWS_REGION)
 
 
 def build_vectorstore() -> BaseVectorStore:
-    api_key = os.getenv("PINECONE_API_KEY")
-    if api_key:
+    if os.getenv("PINECONE_API_KEY"):
         from rag.vectorstores.pinecone_store import PineconeVectorStore
         return PineconeVectorStore(
-            api_key=api_key,
+            api_key=os.environ["PINECONE_API_KEY"],
             index_name=os.getenv("PINECONE_INDEX_NAME", "rag-pipeline"),
+            region=os.getenv("PINECONE_REGION", "us-east-1"),
+            enable_hybrid=True,
+        )
+    if os.getenv("QDRANT_URL"):
+        from rag.vectorstores.qdrant_store import QdrantVectorStore
+        return QdrantVectorStore(
+            host=os.environ["QDRANT_URL"],
+            port=int(os.getenv("QDRANT_PORT", "6333")),
+            collection_name=os.getenv("QDRANT_COLLECTION", "rag"),
+            enable_hybrid=True,
         )
     from rag.vectorstores.chroma_store import ChromaVectorStore
     return ChromaVectorStore()

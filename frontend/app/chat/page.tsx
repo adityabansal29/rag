@@ -167,10 +167,13 @@ export default function ChatPage() {
       persistMessages(activeId, withReply);
     } catch (err: unknown) {
       if (err instanceof Error && (err as { code?: string }).code === "SESSION_CORRUPTED") {
-        // Auto-create a new session and retry
+        // Replace the current session's backend thread ID in-place — no new sidebar entry
         const newId = crypto.randomUUID();
-        const fresh: Session = { id: newId, title: text.slice(0, 40), createdAt: Date.now(), messages: withUser };
-        setSessions((prev) => { const u = [fresh, ...prev]; saveSessions(u); return u; });
+        setSessions((prev) => {
+          const updated = prev.map((s) => s.id === activeId ? { ...s, id: newId, messages: withUser } : s);
+          saveSessions(updated);
+          return updated;
+        });
         setActiveId(newId);
         try {
           const { answer, sources } = await sendChat(text, newId);
@@ -204,6 +207,15 @@ export default function ChatPage() {
     setMessages([]);
   };
 
+  const clearSessions = () => {
+    const id = crypto.randomUUID();
+    const fresh: Session = { id, title: "New chat", createdAt: Date.now(), messages: [] };
+    saveSessions([fresh]);
+    setSessions([fresh]);
+    setActiveId(id);
+    setMessages([]);
+  };
+
   const switchSession = (s: Session) => {
     setActiveId(s.id);
     setMessages(s.messages);
@@ -226,7 +238,7 @@ export default function ChatPage() {
             New chat
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto py-2 space-y-0.5 px-2">
+        <div className="flex-1 overflow-y-auto py-2 space-y-0.5 px-2 pb-0">
           {sessions.map((s) => (
             <button
               key={s.id}
@@ -243,6 +255,16 @@ export default function ChatPage() {
             </button>
           ))}
         </div>
+        {sessions.length > 0 && (
+          <div className="px-3 py-2 border-t border-border">
+            <button
+              onClick={clearSessions}
+              className="w-full text-xs text-destructive hover:text-destructive/70 transition-colors py-1"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main chat area */}

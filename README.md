@@ -143,23 +143,17 @@ A LangGraph ReAct agent exposes `rag_search` (a LangChain `@tool` wrapping `Fusi
 
 ## Screenshots
 
-**Pipeline — job started (0%)**  
-![Pipeline job started](docs/screenshots/pipeline_job_start.png)
+**Upload a document**  
+![Upload a document](screenshots/upload_doc.png)
 
-**Pipeline — parsing complete, chunking in progress (20%)**  
-![Pipeline in progress](docs/screenshots/pipeline_job_inprogress.png)
+**Pipeline — job started (0%)**  
+![Pipeline job started](screenshots/pipeline_job_start.png)
+
+**Pipeline — parsing complete, chunking in progress**  
+![Pipeline in progress](screenshots/pipeline_job_inprogress.png)
 
 **Pipeline — all 5 steps complete (100%)**  
-![Pipeline complete](docs/screenshots/pipeline_job_complete.png)
-
-**Chat — empty state**  
-![Chat empty state](docs/screenshots/chat-empty.png)
+![Pipeline complete](screenshots/pipeline_job_complete.png)
 
 **Chat — answer with RRF-scored sources**  
-![Chat answer with sources](docs/screenshots/chat-q1-answer.png)
-
-**Chat — source chunk expanded**  
-![Source chunk expanded](docs/screenshots/chat-q1-sources.png)
-
-**Chat — multi-turn follow-up (agent resolves context from history)**  
-![Multi-turn follow-up](docs/screenshots/chat-q2-multiturn.png)
+![Chat app](screenshots/chat_app.png)

@@ -137,7 +137,9 @@ class PineconeVectorStore(BaseVectorStore):
         params: SearchParams | None = None,
     ) -> list[Document]:
         if not self.enable_hybrid:
-            raise NotImplementedError("PineconeVectorStore requires enable_hybrid=True for BM25 search.")
+            # ponytail: no sparse encoder — fusion still works via dense-only paths
+            logger.debug("BM25 search skipped: enable_hybrid=False on this Pinecone index")
+            return []
         params = params or SearchParams()
         raw_sparse = self._sparse_encoder.encode_queries(query_text)
         sparse_vector = {
